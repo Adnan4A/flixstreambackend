@@ -1107,7 +1107,10 @@ async function loadStream() {
 
     setStatus(STATUS.load);
     hls = new Hls({
-      enableWorker: true
+      enableWorker: true,
+      xhrSetup: function (xhr) {
+        xhr.setRequestHeader('X-Flix-Client', '1');
+      }
     });
     // Direct mode: server only serves the master playlist; segments are fetched
     // straight from the CDN by the browser. Falls back to full proxying on error.

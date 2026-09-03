@@ -141,11 +141,34 @@ function isAllowedOrigin(origin) {
     }
 }
 
+function hostOrigin(req) {
+    const host = req.headers.host;
+    if (!host || typeof host !== 'string') return '';
+    try {
+        const u = new URL(`http://${host}`);
+        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+            return u.protocol === 'http:' ? u.origin : '';
+        }
+        if (ALLOWED_HOSTS.has(u.hostname)) return `https://${u.hostname}`;
+    } catch {}
+    return '';
+}
+
+function hasFlixClient(req) {
+    const v = req.headers[CLIENT_HEADER];
+    return v === '1' || v === 1;
+}
+
 function requestOrigin(req) {
     const origin = req.headers.origin;
     if (origin && isAllowedOrigin(origin)) return origin;
     const refererOrigin = parseOrigin(req.headers.referer);
     if (refererOrigin && isAllowedOrigin(refererOrigin)) return refererOrigin;
+    // Player fetch/HLS xhr may omit Origin+Referer (security headers). Trust client marker.
+    if (hasFlixClient(req)) {
+        const fromHost = hostOrigin(req);
+        if (fromHost) return fromHost;
+    }
     return '';
 }
 
@@ -214,11 +237,27 @@ function rewritePlaylist(text, targetUrl, direct) {
         .replace(/URI="([^"]+)"/g, (m, u) => 'URI="' + toProxy(u) + '"');
 }
 
-function applySecurityHeaders(res) {
+function applySecurityHeaders(res, opts = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
+    if (!opts.allowFrame) res.setHeader('X-Frame-Options', 'DENY');
+    // no-referrer breaks same-origin /api/* auth fallback for the embedded player.
+    res.setHeader('Referrer-Policy', opts.playerPage ? 'strict-origin-when-cross-origin' : 'no-referrer');
     res.setHeader('X-Powered-By', '');
+}
+
+function serveStaticFile(res, filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const types = {
+        '.png': 'image/png',
+        '.ico': 'image/x-icon',
+        '.svg': 'image/svg+xml',
+        '.webp': 'image/webp',
+    };
+    fs.readFile(filePath, (err, buf) => {
+        if (err) { hide(res, 404); return; }
+        res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
+        res.end(buf);
+    });
 }
 
 function applyCors(res, origin) {
@@ -586,6 +625,7 @@ const server = http.createServer(async (req, res) => {
         }
         // Local player: /?tmdb=123 serves the cinejoy player HTML.
         if (pathname === '/' && url.searchParams.has('tmdb')) {
+            applySecurityHeaders(res, { playerPage: true, allowFrame: true });
             fs.readFile(path.join(__dirname, 'cinejoy.html'), (err, buf) => {
                 if (err) { res.writeHead(404); res.end('Not Found'); return; }
                 res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -604,11 +644,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/cinejoy.html') {
+        applySecurityHeaders(res, { playerPage: true, allowFrame: true });
         fs.readFile(path.join(__dirname, 'cinejoy.html'), (err, buf) => {
             if (err) { res.writeHead(404); res.end('Not Found'); return; }
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(buf);
         });
+        return;
+    }
+
+    if (pathname === '/logo.png' || pathname === '/favicon.ico') {
+        const file = pathname === '/favicon.ico'
+            ? path.join(__dirname, 'favicon.ico')
+            : path.join(__dirname, 'logo.png');
+        serveStaticFile(res, file);
         return;
     }
 
