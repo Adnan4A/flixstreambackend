@@ -55,9 +55,10 @@ function preferredSourceName(raw) {
     return SOURCE_BY_SERVER[t.toLowerCase()] || t;
 }
 
-// Prefer clean CDNs (lol.movieboxnoob / shegu) before Lisbon's flagged info.* host.
-const CLEAN_SOURCES = ['Solara', 'Castle', 'Joy'];
+// Prefer clean CDNs first, then any remaining provider that yields a playable m3u8.
+const CLEAN_SOURCES = ['Solara', 'Castle', 'Joy', 'Athens', 'Sakura', 'Nebula', 'Canaias'];
 const LAST_RESORT_SOURCES = ['Lisbon'];
+const ALL_SOURCES = [...CLEAN_SOURCES, ...LAST_RESORT_SOURCES];
 
 function isDirtyCdnHost(host) {
     const h = String(host || '').toLowerCase();
@@ -78,31 +79,124 @@ function streamHostAcceptable(url, allowDirty) {
     }
 }
 
-/** Sequential Solara → Castle → Joy → Lisbon. One hit per step; stop on first clean URL. */
-async function resolveCinejoyPreferClean(cj, mediaType, ctx, preferred) {
+function normalizeExcludeList(raw) {
+    const out = new Set();
+    const list = Array.isArray(raw) ? raw : (typeof raw === 'string' && raw ? [raw] : []);
+    for (const item of list) {
+        const mapped = preferredSourceName(item) || String(item || '').trim();
+        if (mapped) out.add(mapped.toLowerCase());
+        const dragon = DRAGON_NAMES[mapped];
+        if (dragon) out.add(dragon.toLowerCase());
+        out.add(String(item || '').trim().toLowerCase());
+    }
+    out.delete('');
+    return out;
+}
+
+/**
+ * Try every available server until one returns a real playable m3u8 (or mp4).
+ * Clean CDN hosts first; dirty hosts only after clean options are exhausted.
+ * `exclude` skips providers the player already failed on.
+ */
+async function resolveCinejoyPreferClean(cj, mediaType, ctx, preferred, exclude) {
+    const excluded = normalizeExcludeList(exclude);
     const order = [];
-    const push = (s) => { if (s && !order.includes(s)) order.push(s); };
+    const push = (s) => {
+        if (!s) return;
+        const key = String(s).trim();
+        if (!key) return;
+        if (excluded.has(key.toLowerCase())) return;
+        if (excluded.has((DRAGON_NAMES[key] || '').toLowerCase())) return;
+        if (order.some((x) => x.toLowerCase() === key.toLowerCase())) return;
+        order.push(key);
+    };
+
     push(preferred);
     for (const s of CLEAN_SOURCES) push(s);
     for (const s of LAST_RESORT_SOURCES) push(s);
 
     let lastErr = null;
-    for (const src of order) {
-        const allowDirty = LAST_RESORT_SOURCES.includes(src);
-        try {
-            const info = await cj.resolve(mediaType, ctx, undefined, src);
-            if (!info || !looksLikeStreamUrl(info.url)) continue;
-            if (!streamHostAcceptable(info.url, allowDirty)) {
-                console.error('cinejoy skip', src, 'unacceptable host', (() => { try { return new URL(info.url).hostname; } catch { return '?'; } })());
-                continue;
+    let lastProviders = [];
+    const triedUrls = new Set();
+
+    async function trySource(src, allowDirty) {
+        const info = await cj.resolve(mediaType, ctx, undefined, src);
+        if (Array.isArray(info && info.providers)) {
+            lastProviders = info.providers;
+            for (const p of info.providers) {
+                if (p && p.status === 'ok') push(p.name);
             }
-            return info;
+        }
+        const providerName = info && info.provider ? String(info.provider) : '';
+        if (providerName && (
+            excluded.has(providerName.toLowerCase()) ||
+            excluded.has((DRAGON_NAMES[providerName] || '').toLowerCase())
+        )) {
+            console.error('cinejoy skip', src, 'provider excluded', providerName);
+            return null;
+        }
+        if (!info || !looksLikeStreamUrl(info.url)) {
+            console.error('cinejoy skip', src, 'no https stream url');
+            return null;
+        }
+        // Dirty hosts are deferred on pass 1 — do NOT burn the URL so pass 2 can retry.
+        if (!streamHostAcceptable(info.url, allowDirty)) {
+            const host = (() => { try { return new URL(info.url).hostname; } catch { return '?'; } })();
+            if (!allowDirty && isDirtyCdnHost(host)) {
+                console.error('cinejoy skip', src, 'dirty host deferred', host);
+                return null;
+            }
+            console.error('cinejoy skip', src, 'blocked/unacceptable host', host);
+            triedUrls.add(info.url);
+            return null;
+        }
+        if (triedUrls.has(info.url)) return null;
+        triedUrls.add(info.url);
+
+        // Require a live #EXTM3U playlist (or a sniffable MP4) before accepting.
+        try {
+            const probe = await probePlaylistPlayable(info.url);
+            if (probe.ok) {
+                console.log('cinejoy accept', src, '->', info.provider, 'm3u8 ok');
+                return Object.assign(info, { _playable: { kind: 'hls', maxRes: 0 } });
+            }
+            console.error('cinejoy skip', src, 'playlist not playable', probe.reason || probe.http);
         } catch (e) {
-            lastErr = e;
-            console.error('cinejoy try', src + ':', e.message);
+            console.error('cinejoy skip', src, 'playlist probe failed', e.message);
+        }
+
+        try {
+            const sniff = await cj.sniff(info.url);
+            if (sniff && sniff.kind === 'mp4') {
+                console.log('cinejoy accept', src, '->', info.provider, 'mp4');
+                return Object.assign(info, { _playable: sniff });
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    // Pass 1: clean hosts only. Pass 2: allow dirty CDNs so auto never dies on Solara alone.
+    for (const allowDirty of [false, true]) {
+        for (let i = 0; i < order.length; i++) {
+            const src = order[i];
+            try {
+                const info = await trySource(src, allowDirty);
+                if (info) return info;
+            } catch (e) {
+                lastErr = e;
+                console.error('cinejoy try', src + ':', e.message);
+            }
+        }
+        // Providers discovered mid-pass are appended to `order` and picked up by later indexes.
+        for (const s of ALL_SOURCES) push(s);
+        if (lastProviders.length) {
+            for (const p of lastProviders) {
+                if (p && p.status === 'ok') push(p.name);
+            }
         }
     }
-    throw lastErr || new Error('Resolve returned no stream URL');
+
+    throw lastErr || new Error('No playable m3u8 from any cinejoy server');
 }
 const PORT = process.env.PORT || 3010;
 const TMDB_KEY = process.env.TMDB_API_KEY || '8265bd1679663a7ea12ac168da84d2e8';
@@ -721,9 +815,12 @@ const server = http.createServer(async (req, res) => {
             const season = parseInt(parsed.season, 10);
             const episode = parseInt(parsed.episode, 10);
             const preferred = preferredSourceName(parsed && parsed.server);
+            const exclude = Array.isArray(parsed && parsed.exclude) ? parsed.exclude : [];
+            const excludeKey = exclude.map((s) => preferredSourceName(s) || String(s || '').trim().toLowerCase()).filter(Boolean).sort().join(',');
             const key = (isTv ? 'tv' : 'movie') + ':' + tmdb +
                 (isTv ? ':' + (Number.isInteger(season) && season > 0 ? season : 1) + ':' + (Number.isInteger(episode) && episode > 0 ? episode : 1) : '') +
-                ':' + (preferred || 'auto');
+                ':' + (preferred || 'auto') +
+                (excludeKey ? ':ex:' + excludeKey : '');
             const cached = cinejoyCache.get(key);
             if (cached && cached.at > Date.now() - CINEJOY_CACHE_TTL) {
                 res.writeHead(200, { 'Content-Type': 'application/json', 'X-Cache': 'hit' });
@@ -746,23 +843,30 @@ const server = http.createServer(async (req, res) => {
                 })
                 .then(r => r.json())
                 .catch(() => ({ subtitles: [] }));
-            // Prefer Solara/Castle/Joy (clean CDNs); Lisbon only as last resort.
-            // Sequential — never fan-out — so we don't burst api.shegu.st.
-            const info = await resolveCinejoyPreferClean(cj, isTv ? 'tv' : 'movie', resolveCtx, preferred || '');
+            // Auto: walk every server until a live m3u8 is confirmed. Never return a dead URL.
+            const info = await resolveCinejoyPreferClean(cj, isTv ? 'tv' : 'movie', resolveCtx, preferred || '', exclude);
             const subRes = await subP;
             if (!info || !looksLikeStreamUrl(info.url)) throw new Error('Resolve returned no stream URL');
-            // Sniff only when the CDN host is not in cooldown; otherwise report unknown.
-            let sniff = { kind: 'unknown', maxRes: 0 };
-            if (!isHostBlocked(new URL(info.url).hostname)) {
+            let sniff = info._playable && info._playable.kind
+                ? { kind: info._playable.kind, maxRes: info._playable.maxRes || 0 }
+                : { kind: 'unknown', maxRes: 0 };
+            if (sniff.kind === 'unknown' && !isHostBlocked(new URL(info.url).hostname)) {
                 sniff = await cj.sniff(info.url);
+            }
+            if (sniff.kind === 'hls' && !sniff.maxRes) {
+                try {
+                    const detail = await cj.sniff(info.url);
+                    if (detail && detail.maxRes) sniff.maxRes = detail.maxRes;
+                } catch (_) {}
             }
             // Keep playlist URLs on /api/cjproxy (no direct=1). CDN hosts 403 browser
             // Origin / lack CORS, so HLS.js must load variants+segments via our proxy.
             const playlist = '/api/cjproxy?url=' + encodeURIComponent(info.url);
+            const activeInternal = info.provider;
             const data = {
                 stream: [{
                     playlist,
-                    kind: sniff.kind,
+                    kind: sniff.kind === 'mp4' ? 'mp4' : 'hls',
                     qualities: sniff.maxRes ? [`${sniff.maxRes}p`] : [],
                     rank: sniff.maxRes || 0,
                     source: 'cinejoy'
@@ -770,8 +874,14 @@ const server = http.createServer(async (req, res) => {
                 alternatives: [],
                 subtitles: [...(info.captions || []), ...(subRes.subtitles || [])],
                 meta: { title: typeof parsed.title === 'string' ? parsed.title.slice(0, 200) : String(tmdb) },
-                provider: DRAGON_NAMES[info.provider] || info.provider,
-                servers: (info.providers || []).map(p => ({ name: DRAGON_NAMES[p.name] || p.name, status: p.status, active: p.name === info.provider }))
+                provider: DRAGON_NAMES[activeInternal] || activeInternal,
+                providerInternal: activeInternal,
+                servers: (info.providers || []).map(p => ({
+                    name: DRAGON_NAMES[p.name] || p.name,
+                    internal: p.name,
+                    status: p.status,
+                    active: p.name === activeInternal
+                }))
             };
             cinejoyCache.set(key, { at: Date.now(), data });
             res.writeHead(200, { 'Content-Type': 'application/json' });
