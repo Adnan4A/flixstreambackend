@@ -1,12 +1,16 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { webcrypto } = require('crypto');
 global.crypto = webcrypto;
 
 // Lordflix/Solstice needs browser Origin. Do not stamp that Origin onto cinejoy/shegu fetches.
 const __fetch = global.fetch;
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+// Oracle/PHX egress is IP-banned by api.shegu.st. Route those calls via Cloudflare WARP SOCKS.
+const SHEGU_SOCKS = process.env.SHEGU_SOCKS || process.env.ALL_PROXY || 'socks5h://127.0.0.1:40000';
+
 function mergeHeaders(base, incoming) {
     const out = { ...base };
     if (!incoming) return out;
@@ -16,11 +20,117 @@ function mergeHeaders(base, incoming) {
     }
     return { ...out, ...incoming };
 }
+
+function findCurlBinary() {
+    const env = process.env.CURL_IMPERSONATE;
+    const names = ['curl_chrome145', 'curl_chrome142', 'curl-impersonate', 'curl'];
+    const dirs = (process.env.PATH || '').split(':').filter(Boolean);
+    if (env && fs.existsSync(env)) return env;
+    for (const dir of dirs) {
+        for (const name of names) {
+            const p = path.join(dir, name);
+            if (fs.existsSync(p)) return p;
+        }
+    }
+    return 'curl';
+}
+
+async function bodyToBuffer(body) {
+    if (body == null) return null;
+    if (Buffer.isBuffer(body)) return body;
+    if (body instanceof ArrayBuffer) return Buffer.from(body);
+    if (ArrayBuffer.isView(body)) return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+    if (typeof body === 'string') return Buffer.from(body);
+    if (typeof body === 'object' && typeof body.getReader === 'function') {
+        const chunks = [];
+        const reader = body.getReader();
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(Buffer.from(value));
+        }
+        return Buffer.concat(chunks);
+    }
+    return Buffer.from(String(body));
+}
+
+/** Fetch via SOCKS (WARP) — used only for api.shegu.st which bans the VPS IP. */
+function fetchViaSocks(url, opts = {}) {
+    const href = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
+    const method = (opts.method || 'GET').toUpperCase();
+    const headers = mergeHeaders({
+        'User-Agent': BROWSER_UA,
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://cinejoy.to',
+        'Referer': 'https://cinejoy.to/',
+    }, opts.headers);
+    // System curl is enough here — shegu blocks by IP, not JA3. Prefer it for SOCKS stability.
+    const bin = fs.existsSync('/usr/bin/curl') ? '/usr/bin/curl' : findCurlBinary();
+    const hdrFile = path.join(require('os').tmpdir(), 'shegu-hdr-' + process.pid + '-' + Date.now() + '.txt');
+    const args = [
+        '-sS', '-L', '--max-time', '30',
+        '-x', SHEGU_SOCKS,
+        '-X', method,
+        '-D', hdrFile,
+        '-o', '-',
+        '--compressed',
+    ];
+    for (const [k, v] of Object.entries(headers)) {
+        if (v == null || k.toLowerCase() === 'content-length') continue;
+        args.push('-H', `${k}: ${v}`);
+    }
+    args.push(href);
+
+    return (async () => {
+        const bodyBuf = await bodyToBuffer(opts.body);
+        if (bodyBuf && bodyBuf.length) {
+            args.splice(args.length - 1, 0, '--data-binary', '@-');
+        }
+        const child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+        const chunks = [];
+        const errChunks = [];
+        child.stdout.on('data', (d) => chunks.push(d));
+        child.stderr.on('data', (d) => errChunks.push(d));
+        if (bodyBuf && bodyBuf.length) child.stdin.end(bodyBuf);
+        else child.stdin.end();
+
+        const code = await new Promise((resolve, reject) => {
+            child.on('error', reject);
+            child.on('close', resolve);
+        });
+        const bodyPart = Buffer.concat(chunks);
+        let headerText = '';
+        try {
+            headerText = fs.readFileSync(hdrFile, 'utf8');
+        } catch (_) {}
+        try { fs.unlinkSync(hdrFile); } catch (_) {}
+
+        if (code !== 0 && !bodyPart.length && !headerText) {
+            const err = Buffer.concat(errChunks).toString('utf8').trim();
+            throw new Error('shegu socks fetch failed: ' + (err || ('exit ' + code)));
+        }
+        // After redirects, -D may contain multiple HTTP responses — use the last.
+        const blocks = headerText.split(/\r?\n\r?\n/).filter((b) => /^HTTP\/\d/i.test(b));
+        const last = blocks[blocks.length - 1] || headerText;
+        const statusLine = (last.split(/\r?\n/)[0] || '');
+        const statusMatch = statusLine.match(/HTTP\/\d(?:\.\d)?\s+(\d+)/i);
+        const status = statusMatch ? parseInt(statusMatch[1], 10) : (code === 0 ? 200 : 502);
+        const hdrs = new Headers();
+        for (const line of last.split(/\r?\n/).slice(1)) {
+            const c = line.indexOf(':');
+            if (c > 0) hdrs.set(line.slice(0, c).trim(), line.slice(c + 1).trim());
+        }
+        return new Response(bodyPart, { status, headers: hdrs });
+    })();
+}
+
 global.fetch = async (url, opts = {}) => {
     const href = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
-    // NOTE: do NOT route api.shegu.st through browserfetch here — resolve POSTs a body
-    // and impersonatedRequest is playlist-oriented (no body). Native fetch works for shegu;
-    // Chrome impersonation stays on /api/cjproxy playlist fetches only.
+    // api.shegu.st bans this VPS public IP — go through WARP SOCKS.
+    if (/api\.shegu\.st/i.test(href) && SHEGU_SOCKS) {
+        return fetchViaSocks(url, opts);
+    }
     const lordflix = /lordflix/i.test(href);
     const base = {
         'User-Agent': BROWSER_UA,
