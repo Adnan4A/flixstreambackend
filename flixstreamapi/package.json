@@ -1,0 +1,16 @@
+{
+  "name": "m3u8-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --expose-gc --max-old-space-size=450 server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "mongodb": "^7.1.0",
+    "puppeteer": "^23.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

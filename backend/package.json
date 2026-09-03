@@ -1,0 +1,13 @@
+{
+  "name": "flixstream-backend",
+  "version": "1.0.0",
+  "description": "Movie stream API backend (vidlove/67movies) with media proxy and subtitles. Zero dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

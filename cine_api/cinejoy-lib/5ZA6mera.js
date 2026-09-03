@@ -1,0 +1,1 @@
+function u(t){return--t*t*((1.70158+1)*t+1.70158)+1}function o(t){const r=t-1;return r*r*r+1}function c(t){return Math.pow(t-1,3)*(1-t)+1}function n(t){return--t*t*t*t*t+1}export{c as a,u as b,o as c,n as q};

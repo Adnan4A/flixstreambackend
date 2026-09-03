@@ -1,0 +1,13 @@
+{
+  "name": "flixstream-server",
+  "version": "1.0.0",
+  "description": "FlixStream - Solstice-powered HLS video player server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test.js"
+  },
+  "author": "",
+  "license": "MIT"
+}
