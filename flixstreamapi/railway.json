@@ -1,6 +1,0 @@
-{
-  "restartPolicyType": "always",
-  "restartPolicyMaxRetries": 10,
-  "healthcheckPath": "/health",
-  "healthcheckTimeout": 300
-}
