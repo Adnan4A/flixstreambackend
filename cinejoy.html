@@ -463,12 +463,17 @@ let currentEpisode = parseInt(params.get('episode')) || 1;
 let START_AT = parseFloat(params.get('t') || '0') || 0;
 const IS_GUEST = params.get('g') !== '0';
 let selectedServer = 'auto';
+let failedServers = [];
+let knownServers = [];
+let activeProvider = '';
+let failoverInProgress = false;
 const body = () => ({
   tmdb: TMDB_ID,
   type: isTV ? 'tv' : 'movie',
   season: currentSeason,
   episode: currentEpisode,
-  server: selectedServer && selectedServer !== 'auto' ? selectedServer : undefined
+  server: selectedServer && selectedServer !== 'auto' ? selectedServer : undefined,
+  exclude: failedServers.length ? failedServers.slice() : undefined
 });
 const GUEST_RESUME_TTL = 7 * 24 * 60 * 60 * 1000;
 const GUEST_CONTINUE_KEY = 'flixstream:guest-continue:v1';
@@ -574,8 +579,52 @@ let subtitleList = [];
 let subtitleCues = [];
 let currentSubIdx = -1;
 let attempt = 0;
-let useDirect = true;
+// Always proxy via /api/cjproxy — CDN hosts lack CORS and break HLS.js in the browser.
+let useDirect = false;
 let seeking = false;
+let streamTries = 0;
+const MAX_STREAM_TRIES = 10;
+const STATUS_FAILOVER = ['Trying another server...','Switching source...','Finding a working stream...'];
+
+function markServerFailed(name) {
+  if (!name) return;
+  const n = String(name);
+  if (!failedServers.some(s => s.toLowerCase() === n.toLowerCase())) failedServers.push(n);
+}
+
+function nextFailoverServer() {
+  const failed = new Set(failedServers.map(s => s.toLowerCase()));
+  if (activeProvider) failed.add(String(activeProvider).toLowerCase());
+  for (const s of knownServers) {
+    const name = s && (s.name || s);
+    if (!name) continue;
+    if (failed.has(String(name).toLowerCase())) continue;
+    if (s.status && s.status !== 'ok') continue;
+    return String(name);
+  }
+  return null;
+}
+
+function failoverToNextServer(reason) {
+  if (failoverInProgress) return false;
+  if (streamTries >= MAX_STREAM_TRIES) return false;
+  markServerFailed(activeProvider);
+  const next = nextFailoverServer();
+  // Even without a named next server, keep going in auto with excludes if we haven't exhausted tries.
+  if (!next && failedServers.length === 0) return false;
+  if (!next && streamTries >= 3) return false;
+  failoverInProgress = true;
+  console.warn('stream failover:', reason || 'error', '->', next || 'auto', 'failed:', failedServers.join(','));
+  setStatus(STATUS_FAILOVER);
+  loading.classList.remove('hidden');
+  errorScreen.classList.remove('show');
+  selectedServer = 'auto';
+  attempt = 0;
+  useDirect = false;
+  failoverInProgress = false;
+  loadStream();
+  return true;
+}
 
 // ── Controls Show/Hide ──
 function showControls() {
@@ -1014,6 +1063,8 @@ function loadTheme() {
 
 function selectServer(name, btn) {
   selectedServer = name || 'auto';
+  failedServers = [];
+  activeProvider = '';
   serverSub.querySelectorAll('.submenu-item').forEach(b => b.classList.remove('active'));
   btn.classList.add('active', 'working');
   if (name === 'auto') serverValue.textContent = 'Auto';
@@ -1022,21 +1073,24 @@ function selectServer(name, btn) {
 }
 
 function buildServerMenu(servers, activeName) {
+  knownServers = Array.isArray(servers) ? servers.slice() : [];
+  activeProvider = activeName || '';
   serverSub.innerHTML = '';
   const auto = document.createElement('button');
-  auto.className = 'submenu-item active working';
+  auto.className = 'submenu-item' + (selectedServer === 'auto' ? ' active working' : '');
   auto.innerHTML = '<span class="check"></span>Auto';
   auto.onclick = () => selectServer('auto', auto);
   serverSub.appendChild(auto);
-  if (activeName) serverValue.textContent = activeName;
+  if (activeName) serverValue.textContent = selectedServer === 'auto' ? ('Auto · ' + activeName) : activeName;
   (servers || []).forEach(s => {
     const b = document.createElement('button');
-    b.className = 'submenu-item' + (s.active ? ' working' : '');
+    const isActive = s.active || (activeName && s.name === activeName);
+    b.className = 'submenu-item' + (isActive && selectedServer !== 'auto' ? ' active working' : (isActive ? ' working' : ''));
     const check = document.createElement('span');
     check.className = 'check';
     b.appendChild(check);
     b.appendChild(document.createTextNode(String(s.name || 'Server')));
-    if (!s.active) {
+    if (!isActive) {
       const dot = document.createElement('span');
       dot.className = 'srv-dot';
       dot.title = String(s.status || 'ok');
@@ -1067,10 +1121,15 @@ function startPlayback() {
 }
 
 async function loadStream() {
+  if (streamTries >= MAX_STREAM_TRIES) {
+    showError('No working stream found');
+    return;
+  }
+  streamTries++;
   destroyHls();
   loading.classList.remove('hidden');
   errorScreen.classList.remove('show');
-  setStatus(STATUS.resolve);
+  setStatus(failedServers.length ? STATUS_FAILOVER : STATUS.resolve);
 
   try {
     const resp = await apiFetch('/api/cinejoy', {
@@ -1079,14 +1138,22 @@ async function loadStream() {
       body: JSON.stringify(body())
     });
     const data = await resp.json();
-    if (!resp.ok || data.error) throw new Error(data.error || 'Unknown error');
-    // First attempt streams segments directly from the CDN (server only fetches the
-    // master playlist). A fatal error rolls back to full server proxying.
+    if (!resp.ok || data.error) {
+      markServerFailed(activeProvider || selectedServer);
+      selectedServer = 'auto';
+      if (failoverToNextServer(data.error || 'resolve failed')) return;
+      throw new Error(data.error || 'Unknown error');
+    }
     const stream = data.stream?.[0];
     let playlist = stream?.playlist; // already proxied via /api/cjproxy
-    if (!playlist) throw new Error('No stream available');
+    if (!playlist) {
+      markServerFailed(data.provider || activeProvider);
+      if (failoverToNextServer('no playlist')) return;
+      throw new Error('No stream available');
+    }
     playlist = apiUrl(playlist);
     buildServerMenu(data.servers, data.provider);
+    if (data.provider) activeProvider = data.provider;
     if (data.subtitles) {
       subtitleList = data.subtitles;
       currentSubIdx = -1;
@@ -1099,18 +1166,25 @@ async function loadStream() {
       video.src = playlist;
       video.addEventListener('loadedmetadata', () => {
         loading.classList.add('hidden');
+        streamTries = 0;
         startPlayback();
         updateTitleCard();
+      }, { once: true });
+      video.addEventListener('error', () => {
+        destroyHls();
+        if (!failoverToNextServer('mp4 error')) showError('Stream error: media');
       }, { once: true });
       return;
     }
 
     setStatus(STATUS.load);
     hls = new Hls({
-      enableWorker: true
+      enableWorker: true,
+      xhrSetup: function (xhr) {
+        xhr.setRequestHeader('X-Flix-Client', '1');
+      }
     });
-    // Direct mode: server only serves the master playlist; segments are fetched
-    // straight from the CDN by the browser. Falls back to full proxying on error.
+    // Prefer full proxy after the first failure — CDN direct mode often 403s.
     const hlsPlaylist = useDirect && playlist.includes('/api/cjproxy?')
       ? playlist + '&direct=1'
       : playlist;
@@ -1120,22 +1194,30 @@ async function loadStream() {
       buildQualityOptions(hls.levels);
       startPlayback();
       loading.classList.add('hidden');
+      streamTries = 0;
       updateTitleCard();
     });
     hls.on(Hls.Events.ERROR, (e, ev) => {
-      if (ev.fatal) {
-        destroyHls();
-        if (attempt === 0 && useDirect) { useDirect = false; attempt++; loadStream(); }
-        else if (attempt === 0) { attempt++; loadStream(); }
-        else showError('Stream error: ' + ev.type);
-      }
+      if (!ev.fatal) return;
+      destroyHls();
+      // Switch to next available server with a working m3u8 (already fully proxied).
+      if (failoverToNextServer(ev.type || 'networkError')) return;
+      showError('Stream error: ' + ev.type);
     });
   } catch (e) {
+    markServerFailed(activeProvider);
+    if (failoverToNextServer(e.message)) return;
     showError(e.message);
   }
 }
 
-function retry() { attempt = 0; useDirect = true; loadStream(); }
+function retry() {
+  attempt = 0;
+  useDirect = false;
+  streamTries = 0;
+  failedServers = [];
+  loadStream();
+}
 
 function buildQualityOptions(levels) {
   qualitySub.innerHTML = '';
