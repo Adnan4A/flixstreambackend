@@ -1,4 +1,4 @@
-// cinejoy.js — resolve stream links from cinejoy.to via api.shegu.st (attestation + scrypt POW)
+// cinejoy.js — resolve stream links from cinejoy.pk via api.wing.st (attestation + scrypt POW)
 // Usage:
 //   node cinejoy.js movie <tmdbId> [server]
 //   node cinejoy.js tv <tmdbId> <season> <episode> [server]
@@ -29,7 +29,7 @@ globalThis.document = {
     hidden: false,
     visibilityState: 'visible',
 };
-Object.defineProperty(globalThis, 'location', { value: new URL('https://cinejoy.to/'), configurable: true });
+Object.defineProperty(globalThis, 'location', { value: new URL('https://cinejoy.pk/'), configurable: true });
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 globalThis.requestAnimationFrame = fn => setTimeout(fn, 16);
 globalThis.cancelAnimationFrame = clearTimeout;
@@ -52,7 +52,7 @@ globalThis.OffscreenCanvas = class { getContext() { return null; } };
 globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
 
-const REFERER = 'https://cinejoy.to/';
+const REFERER = 'https://cinejoy.pk/';
 const CINEJOY_API_HOST = 'api.wing.st';
 
 // Cinejoy's obfuscated client still points at api.shegu.st, which is CF 502.
@@ -118,7 +118,7 @@ async function sniff(url) {
         const res = await impersonatedRequest(url, {
             headers: {
                 'Referer': REFERER,
-                'Origin': 'https://cinejoy.to',
+                'Origin': 'https://cinejoy.pk',
                 'Accept': '*/*'
             },
             timeoutMs: 5000

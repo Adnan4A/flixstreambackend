@@ -73,8 +73,8 @@ function fetchViaSocks(url, opts = {}) {
         'User-Agent': BROWSER_UA,
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': 'https://cinejoy.to',
-        'Referer': 'https://cinejoy.to/',
+        'Origin': 'https://cinejoy.pk',
+        'Referer': 'https://cinejoy.pk/',
     }, opts.headers);
     // System curl is enough here — shegu blocks by IP, not JA3. Prefer it for SOCKS stability.
     const bin = fs.existsSync('/usr/bin/curl') ? '/usr/bin/curl' : findCurlBinary();
@@ -150,8 +150,8 @@ global.fetch = async (url, opts = {}) => {
                     'User-Agent': BROWSER_UA,
                     'Accept': '*/*',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'Origin': 'https://cinejoy.to',
-                    'Referer': 'https://cinejoy.to/',
+                    'Origin': 'https://cinejoy.pk',
+                    'Referer': 'https://cinejoy.pk/',
                 }, opts.headers),
             });
             if (direct.status !== 403 && direct.status !== 451 && direct.status !== 502) {
@@ -611,7 +611,7 @@ async function probePlaylistPlayable(streamUrl) {
     const { impersonatedRequest } = require('./browserfetch.js');
     const up = await Promise.race([
         impersonatedRequest(streamUrl, {
-            headers: { Referer: 'https://cinejoy.to/', Origin: 'https://cinejoy.to' },
+            headers: { Referer: 'https://cinejoy.pk/', Origin: 'https://cinejoy.pk' },
             timeoutMs: 15000,
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('playlist probe timeout')), 16000)),
@@ -1117,7 +1117,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Proxy: cinejoy streams (spoofs cinejoy.to origin, rewrites m3u8, passes Range)
+    // Proxy: cinejoy streams (spoofs cinejoy.pk origin, rewrites m3u8, passes Range)
     // ?direct=1 rewrites playlist URLs to absolute CDN URLs so the BROWSER fetches
     // segments directly (server touches the CDN only for the master playlist).
     if (pathname === '/api/cjproxy') {
@@ -1139,7 +1139,7 @@ const server = http.createServer(async (req, res) => {
             const { impersonatedRequest } = require('./browserfetch.js');
             let up;
             try {
-                up = await impersonatedRequest(target, { headers: { 'Referer': 'https://cinejoy.to/' }, timeoutMs: 20000 });
+                up = await impersonatedRequest(target, { headers: { 'Referer': 'https://cinejoy.pk/' }, timeoutMs: 20000 });
             } catch (e) {
                 console.error('cjproxy playlist fetch:', e.message);
                 hide(res, 502);
@@ -1170,8 +1170,8 @@ const server = http.createServer(async (req, res) => {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Origin': 'https://cinejoy.to',
-            'Referer': 'https://cinejoy.to/'
+            'Origin': 'https://cinejoy.pk',
+            'Referer': 'https://cinejoy.pk/'
         };
         if (req.headers.range) hdrs['Range'] = req.headers.range;
         try {
