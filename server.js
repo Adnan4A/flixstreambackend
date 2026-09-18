@@ -8,8 +8,19 @@ global.crypto = webcrypto;
 // Lordflix/Solstice needs browser Origin. Do not stamp that Origin onto cinejoy/shegu fetches.
 const __fetch = global.fetch;
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-// Oracle/PHX egress is IP-banned by api.shegu.st. Route those calls via Cloudflare WARP SOCKS.
+// Cinejoy moved api.shegu.st -> api.wing.st (shegu origin is CF 502).
+// Oracle/PHX egress was IP-banned by shegu; keep optional WARP SOCKS as fallback.
+const CINEJOY_API_HOST = 'api.wing.st';
 const SHEGU_SOCKS = process.env.SHEGU_SOCKS || process.env.ALL_PROXY || 'socks5h://127.0.0.1:40000';
+
+function rewriteCinejoyApiUrl(href) {
+    if (!href) return href;
+    return String(href).replace(/api\.shegu\.st/gi, CINEJOY_API_HOST);
+}
+
+function isCinejoyApiUrl(href) {
+    return /api\.(shegu\.st|wing\.st)/i.test(href || '');
+}
 
 function mergeHeaders(base, incoming) {
     const out = { ...base };
@@ -56,7 +67,7 @@ async function bodyToBuffer(body) {
 
 /** Fetch via SOCKS (WARP) — used only for api.shegu.st which bans the VPS IP. */
 function fetchViaSocks(url, opts = {}) {
-    const href = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
+    const href = rewriteCinejoyApiUrl(typeof url === 'string' ? url : (url && (url.url || url.href)) || '');
     const method = (opts.method || 'GET').toUpperCase();
     const headers = mergeHeaders({
         'User-Agent': BROWSER_UA,
@@ -126,10 +137,36 @@ function fetchViaSocks(url, opts = {}) {
 }
 
 global.fetch = async (url, opts = {}) => {
-    const href = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
-    // api.shegu.st bans this VPS public IP — go through WARP SOCKS.
-    if (/api\.shegu\.st/i.test(href) && SHEGU_SOCKS) {
-        return fetchViaSocks(url, opts);
+    let href = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
+    if (isCinejoyApiUrl(href)) {
+        href = rewriteCinejoyApiUrl(href);
+        url = href;
+        // Prefer direct to api.wing.st. SOCKS only if direct is banned/unreachable —
+        // a down WARP proxy used to black-hole every cinejoy resolve.
+        try {
+            const direct = await __fetch(url, {
+                ...opts,
+                headers: mergeHeaders({
+                    'User-Agent': BROWSER_UA,
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Origin': 'https://cinejoy.to',
+                    'Referer': 'https://cinejoy.to/',
+                }, opts.headers),
+            });
+            if (direct.status !== 403 && direct.status !== 451 && direct.status !== 502) {
+                return direct;
+            }
+            console.error('cinejoy api direct', direct.status, 'trying socks');
+        } catch (e) {
+            console.error('cinejoy api direct fail', e.message);
+        }
+        if (SHEGU_SOCKS) {
+            try { return await fetchViaSocks(url, opts); } catch (e) {
+                console.error('cinejoy api socks fail', e.message);
+            }
+        }
+        return __fetch(url, opts);
     }
     const lordflix = /lordflix/i.test(href);
     const base = {
@@ -165,8 +202,9 @@ function preferredSourceName(raw) {
     return SOURCE_BY_SERVER[t.toLowerCase()] || t;
 }
 
-// Prefer clean CDNs first, then any remaining provider that yields a playable m3u8.
-const CLEAN_SOURCES = ['Solara', 'Castle', 'Joy', 'Athens', 'Sakura', 'Nebula', 'Canaias'];
+// Solara currently 500s ("no proxy available: load balancer unreachable").
+// Try other live providers first so health/auto don't stall on the dead backproxy.
+const CLEAN_SOURCES = ['Athens', 'Nebula', 'Castle', 'Joy', 'Sakura', 'Canaias', 'Solara'];
 const LAST_RESORT_SOURCES = ['Lisbon'];
 const ALL_SOURCES = [...CLEAN_SOURCES, ...LAST_RESORT_SOURCES];
 
@@ -603,7 +641,7 @@ async function checkStreamHealth() {
             const cj = require('./cine_api/cinejoy.js');
             const info = await Promise.race([
                 resolveCinejoyPreferClean(cj, 'movie', { tmdbId: HEALTH_TMDB }, ''),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('resolve timeout')), 20000)),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('resolve timeout')), 45000)),
             ]);
             if (!looksLikeStreamUrl(info && info.url)) {
                 healthCache = {

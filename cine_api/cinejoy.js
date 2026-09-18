@@ -53,6 +53,17 @@ globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
 
 const REFERER = 'https://cinejoy.to/';
+const CINEJOY_API_HOST = 'api.wing.st';
+
+// Cinejoy's obfuscated client still points at api.shegu.st, which is CF 502.
+const _fetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (url, opts) => {
+    const href = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
+    if (/api\.shegu\.st/i.test(href)) {
+        return _fetch(href.replace(/api\.shegu\.st/gi, CINEJOY_API_HOST), opts);
+    }
+    return _fetch(url, opts);
+};
 
 let chunkPromise = null;
 function loadChunk() {
