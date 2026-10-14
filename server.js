@@ -1320,7 +1320,12 @@ const server = http.createServer(async (req, res) => {
                 markHostBlocked(targetUrl.hostname);
             }
             if (!proxyRes.ok && proxyRes.status !== 206) {
-                res.writeHead(proxyRes.status, corsHdrs);
+                // Cloudflare replaces origin 502 pages and strips CORS, which makes
+                // hls.js report a fake CORS failure. A missing transcoder segment
+                // ("origin unavailable") is a gap, so answer 404 with our CORS headers.
+                let status = proxyRes.status;
+                if (status === 502 || status === 503 || status === 504) status = 404;
+                res.writeHead(status, corsHdrs);
                 res.end();
                 return;
             }
