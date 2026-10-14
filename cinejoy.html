@@ -9,7 +9,11 @@
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
 <style>
 :root{--bg:#000;--bg2:#1a1a1a;--fg:#fff;--fg2:rgba(255,255,255,.6);--fg3:rgba(255,255,255,.35);--ctrl:rgba(255,255,255,.06);--ctrl-hov:rgba(255,255,255,.14);--ctrl-bg:rgba(20,20,20,.96);--border:rgba(255,255,255,.08);--accent:#fff;--prog:#fff;--vol-thumb:#fff;--rail:rgba(255,255,255,.28);--rail-buf:rgba(255,255,255,.42);--ctrl-icon:rgba(255,255,255,.82);--ctrl-time:rgba(255,255,255,.78);--sub-color:#fff;--sub-bg:rgba(0,0,0,.75);--sub-size:16px}
-.theme-light{--bg:#fff;--bg2:#f0f0f0;--fg:#000;--fg2:rgba(0,0,0,.5);--fg3:rgba(0,0,0,.3);--ctrl:rgba(0,0,0,.06);--ctrl-hov:rgba(0,0,0,.12);--ctrl-bg:rgba(245,245,245,.96);--border:rgba(0,0,0,.1);--accent:#000;--prog:#000;--vol-thumb:#000;--rail:rgba(0,0,0,.22);--rail-buf:rgba(0,0,0,.38);--ctrl-icon:rgba(0,0,0,.72);--ctrl-time:rgba(0,0,0,.62);--sub-color:#000;--sub-bg:rgba(255,255,255,.85);--sub-size:16px}
+.theme-light{--bg:#0c0c0c;--bg2:#161616;--fg:#f3f3f3;--fg2:rgba(255,255,255,.62);--fg3:rgba(255,255,255,.38);--ctrl:rgba(255,255,255,.08);--ctrl-hov:rgba(255,255,255,.16);--ctrl-bg:rgba(20,20,20,.96);--border:rgba(255,255,255,.1);--accent:#fff;--prog:#fff;--vol-thumb:#fff;--rail:rgba(255,255,255,.28);--rail-buf:rgba(255,255,255,.42);--ctrl-icon:rgba(255,255,255,.86);--ctrl-time:rgba(255,255,255,.8);--sub-color:#fff;--sub-bg:rgba(0,0,0,.75);--sub-size:16px}
+.theme-light .settings-panel,.theme-light .subtitle-popover{color:#161616;--fg:#161616;--fg2:rgba(0,0,0,.55);--fg3:rgba(0,0,0,.35);--ctrl:rgba(0,0,0,.06);--ctrl-hov:rgba(0,0,0,.1);--accent:#111;--border:rgba(0,0,0,.12);--bg:#fff}
+.theme-light .settings-panel .submenu-item,.theme-light .subtitle-popover .subtitle-item,.theme-light .settings-row{color:rgba(22,22,22,.72)}
+.theme-light .settings-panel .submenu-item.active,.theme-light .subtitle-popover .subtitle-item.active,.theme-light .settings-header{color:#111}
+.theme-light .loading-screen,.theme-light .error-screen,.theme-light .bg,.theme-light .video-container{background:#0c0c0c}
 .theme-purple{--bg:#0a0010;--bg2:#1a0028;--fg:#e8d5ff;--fg2:rgba(232,213,255,.5);--fg3:rgba(232,213,255,.3);--ctrl:rgba(180,100,255,.12);--ctrl-hov:rgba(180,100,255,.25);--ctrl-bg:rgba(20,0,40,.96);--border:rgba(180,100,255,.15);--accent:#b77aff;--prog:#b77aff;--vol-thumb:#b77aff;--rail:rgba(232,213,255,.28);--rail-buf:rgba(232,213,255,.42);--ctrl-icon:rgba(232,213,255,.82);--ctrl-time:rgba(232,213,255,.78);--sub-color:#e8d5ff;--sub-bg:rgba(10,0,16,.85);--sub-size:16px}
 .theme-ocean{--bg:#000d14;--bg2:#001a2a;--fg:#c8eaff;--fg2:rgba(200,234,255,.5);--fg3:rgba(200,234,255,.3);--ctrl:rgba(60,180,255,.12);--ctrl-hov:rgba(60,180,255,.25);--ctrl-bg:rgba(0,13,30,.96);--border:rgba(60,180,255,.15);--accent:#5cb8ff;--prog:#5cb8ff;--vol-thumb:#5cb8ff;--rail:rgba(200,234,255,.28);--rail-buf:rgba(200,234,255,.42);--ctrl-icon:rgba(200,234,255,.82);--ctrl-time:rgba(200,234,255,.78);--sub-color:#c8eaff;--sub-bg:rgba(0,13,20,.85);--sub-size:16px}
 
@@ -144,6 +148,7 @@ body.ep-open .episode-rail{display:flex}
 .submenu-item{display:flex;align-items:center;gap:10px;padding:9px 14px 9px 28px;border-radius:8px;cursor:pointer;transition:background .15s;border:none;background:transparent;color:var(--fg2);font-size:13px;font-family:inherit;width:100%;text-align:left}
 .submenu-item:hover{background:var(--ctrl);color:var(--fg)}
 .submenu-item.active{color:var(--fg)}
+.submenu-item.live-server{color:var(--fg)}
 .submenu-item .check{width:16px;height:16px;border-radius:50%;border:2px solid var(--fg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
 .submenu-item.active .check{border-color:var(--accent);background:var(--accent)}
 .submenu-item.active .check::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--bg)}
@@ -151,13 +156,18 @@ body.ep-open .episode-rail{display:flex}
 .submenu-item.failed{color:#ef4444}
 .submenu-item.failed .check{border-color:#ef4444;background:transparent}
 .submenu-item.failed .check::after{content:'!';width:auto;height:auto;background:none;color:#ef4444;font-size:10px;font-weight:700;line-height:1}
-.srv-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;margin-left:auto}
+.srv-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;margin-left:auto;display:none}
+.submenu-item.active .srv-dot,.subtitle-item.active .srv-dot,.submenu-item.live-server .srv-dot{display:block}
 /* Subtitle Popover */
 .subtitle-popover{position:fixed;z-index:25;right:16px;bottom:56px;background:var(--ctrl-bg);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:14px;padding:10px;width:280px;max-height:60vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.6);opacity:0;transform:scale(.92) translateY(8px);pointer-events:none;transition:opacity .2s,transform .2s}
 .subtitle-popover.open{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}
 .subtitle-popover-header{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
 .subtitle-popover-header .value{color:var(--fg2);font-size:11px;text-transform:none}
 .controls-row button.active{color:var(--accent)}
+.server-cloud-btn{position:relative}
+.server-cloud-btn .cloud-live-dot{position:absolute;top:5px;right:3px;width:6px;height:6px;margin:0;display:none;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.45)}
+.server-cloud-btn.live .cloud-live-dot{display:block}
+body:not(.is-tv) #epBtn,body:not(.is-tv) #episodeRail{display:none!important}
 .subtitle-item{display:flex;align-items:center;gap:12px;padding:9px 14px;border-radius:8px;cursor:pointer;transition:background .15s;border:none;background:transparent;color:var(--fg2);font-size:13px;font-family:inherit;width:100%;text-align:left;position:relative}
 .subtitle-group-list .subtitle-item{padding-left:30px}
 .subtitle-item:hover{background:var(--ctrl);color:var(--fg)}
@@ -249,7 +259,66 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
 .title-card .overview{-webkit-line-clamp:2;font-size:13px}
 }
 
+/* ── Touch devices (phones/tablets): streaming-app layout. Desktop untouched. ── */
+.progress-row{display:flex;align-items:center;gap:12px}
+.progress-row .progress-wrap{flex:1;min-width:0}
+.time-m,.top-bar .back-arrow,.controls-row .pip-btn{display:none}
+@media (pointer:coarse){
+.top-bar{display:grid;grid-template-columns:48px 1fr 48px;align-items:center;padding:calc(14px + env(safe-area-inset-top)) 14px 14px;gap:0;background:linear-gradient(180deg,rgba(0,0,0,.7) 0,transparent 100%)}
+.top-bar > div{display:none}
+.top-bar .back{width:44px;height:44px;justify-content:center;color:#fff}
+.top-bar .back .back-txt,.top-bar .back svg:not(.back-arrow){display:none}
+.top-bar .back .back-arrow{display:block;width:26px;height:26px}
+.top-bar .title{grid-column:2;text-align:center;font-size:16px;font-weight:500}
+.center-overlay{gap:clamp(36px,13vw,84px);background:none}
+body.chrome-visible .center-overlay{opacity:1}
+.center-overlay button,.center-overlay button:hover{background:none;backdrop-filter:none;-webkit-backdrop-filter:none;color:#fff;border-radius:0;filter:drop-shadow(0 2px 8px rgba(0,0,0,.6));pointer-events:auto;-webkit-tap-highlight-color:transparent}
+.center-overlay .play-btn{width:84px;height:84px;background:none}
+.center-overlay .play-btn svg{width:76px;height:76px}
+.center-overlay .skip-btn{width:64px;height:64px}
+.center-overlay .skip-btn svg{width:60px;height:60px}
+.bottom-controls{padding:0 18px calc(14px + env(safe-area-inset-bottom));background:linear-gradient(0deg,rgba(0,0,0,.85) 0,rgba(0,0,0,.4) 60%,transparent 100%)}
+.time-m{display:block;min-width:36px;font-size:15px;font-weight:500;color:#fff;font-variant-numeric:tabular-nums}
+.progress-wrap{height:28px}
+.progress-track{height:4px}
+.progress-thumb{transform:translateY(-50%) scale(1);width:14px;height:14px;margin-left:-7px}
+.controls-row{justify-content:center;gap:clamp(14px,6vw,40px);padding:8px 0 4px}
+.controls-row .playback-cluster>.play-ctrl,.controls-row .playback-cluster>.skip-ctrl,.controls-row .time,.controls-row .spacer{display:none}
+.controls-row .playback-cluster{order:0}
+.controls-row .volume-wrap .volume-slider{display:none}
+.controls-row .volume-wrap button{display:flex}
+.controls-row button{padding:10px;color:#fff;-webkit-tap-highlight-color:transparent}
+.controls-row button svg{width:26px;height:26px}
+.controls-row .pip-btn:not([hidden]){display:flex;order:1}
+.controls-row #epBtn{order:2}
+.controls-row #serverBtn{order:3}
+.controls-row #ccBtn{order:4}
+.controls-row button[title="Settings"]{order:5}
+.controls-row button[title="Fullscreen"]{order:6}
+.settings-panel,.subtitle-popover{left:0;right:0;margin:0 auto;bottom:calc(84px + env(safe-area-inset-bottom));width:min(300px,calc(100vw - 20px));max-height:56vh;overflow-y:auto}
+.settings-panel{min-width:0}
+body.chrome-visible .subtitle-overlay{bottom:calc(100px + env(safe-area-inset-bottom))}
+body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-inset-bottom))}
+.title-card{bottom:calc(130px + env(safe-area-inset-bottom))}
+}
+@media (pointer:coarse) and (orientation:landscape) and (max-height:500px){
+.top-bar{padding:calc(6px + env(safe-area-inset-top)) 14px 6px;background:linear-gradient(180deg,rgba(0,0,0,.7) 0,transparent 100%)}
+.center-overlay .play-btn{width:64px;height:64px}
+.center-overlay .play-btn svg{width:58px;height:58px}
+.center-overlay .skip-btn{width:52px;height:52px}
+.center-overlay .skip-btn svg{width:48px;height:48px}
+.bottom-controls{padding:0 24px calc(6px + env(safe-area-inset-bottom))}
+.progress-wrap{height:20px}
+.controls-row{padding:0}
+.controls-row button{padding:6px}
+.controls-row button svg{width:22px;height:22px}
+.settings-panel,.subtitle-popover{bottom:calc(62px + env(safe-area-inset-bottom));max-height:72vh}
+.title-card{bottom:calc(84px + env(safe-area-inset-bottom))}
+}
+
 .hidden{display:none!important}
+.warn-banner{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:45;max-width:min(92vw,520px);background:rgba(120,70,0,.94);color:#ffe9b8;border:1px solid rgba(255,190,80,.55);border-radius:10px;padding:8px 14px;font:500 13px/1.35 Inter,sans-serif;opacity:0;pointer-events:none;transition:opacity .2s;text-align:center}
+.warn-banner.show{opacity:1}
 </style>
 </head>
 <body>
@@ -261,11 +330,13 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
       <circle cx="40" cy="40" r="36"/>
       <circle class="arc" cx="40" cy="40" r="36"/>
     </svg>
-    <img class="loading-logo" src="/logo.png" alt="">
+    <img class="loading-logo" src="/logo.png?v=20260816" alt="">
   </div>
   <div class="loading-text" id="loadingText">Connecting to stream...</div>
   <div class="loading-bar"><div class="loading-bar-fill"></div></div>
 </div>
+
+<div class="warn-banner" id="warnBanner" role="status" aria-live="polite"></div>
 
 <!-- Error -->
 <div class="error-screen" id="error">
@@ -279,20 +350,20 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
 
 <!-- Video -->
 <div class="video-container">
-  <video id="video" playsinline autoplay muted></video>
+  <video id="video" playsinline autoplay muted webkit-playsinline></video>
   <div class="subtitle-overlay" id="subtitleOverlay"></div>
 </div>
 
 <!-- Center Play Overlay -->
 <div class="center-overlay" id="centerOverlay">
   <button class="skip-btn" onclick="skip(-10)" title="Back 10s">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/><line x1="4" y1="4" x2="8" y2="8"/></svg>
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.2 12a8.8 8.8 0 1 0 2.6-6.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M3.1 3.6v5.1h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><text x="12.2" y="16.1" text-anchor="middle" fill="currentColor" font-size="7.4" font-weight="700" font-family="Inter,system-ui,sans-serif">10</text></svg>
   </button>
   <button class="play-btn" id="centerPlayBtn" onclick="togglePlay()">
     <svg id="centerPlayIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
   </button>
   <button class="skip-btn" onclick="skip(10)" title="Forward 10s">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/><line x1="20" y1="4" x2="16" y2="8"/></svg>
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.8 12a8.8 8.8 0 1 1-2.6-6.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M20.9 3.6v5.1h-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><text x="11.8" y="16.1" text-anchor="middle" fill="currentColor" font-size="7.4" font-weight="700" font-family="Inter,system-ui,sans-serif">10</text></svg>
   </button>
 </div>
 
@@ -300,7 +371,8 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
 <div class="top-bar" id="topBar">
   <button class="back" onclick="goBack()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-    Back
+    <svg class="back-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    <span class="back-txt">Back</span>
   </button>
   <span class="title" id="titleText">Now Playing</span>
   <div style="flex:1"></div>
@@ -333,13 +405,14 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
       </button>
     </div>
   </div>
+  <div class="progress-row"><span class="time-m" id="timeLabelM">0:00</span>
   <div class="progress-wrap" id="progressWrap">
     <div class="progress-track">
       <div class="progress-buffer" id="bufferBar"></div>
       <div class="progress-fill" id="progressFill"></div>
       <div class="progress-thumb" id="progressThumb"></div>
     </div>
-  </div>
+  </div></div>
   <div class="controls-row">
     <div class="playback-cluster">
       <button class="play-ctrl" id="barPlayBtn" onclick="togglePlay()" title="Play">
@@ -368,8 +441,15 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
     </div>
     <span class="time" id="timeLabel">0:00 / 0:00</span>
     <div class="spacer"></div>
+    <button id="pipBtn" class="pip-btn" onclick="togglePip()" title="Picture in picture" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><rect x="11.5" y="11" width="8" height="6" rx="1" fill="currentColor"/></svg>
+    </button>
     <button id="epBtn" onclick="toggleEpisodeRail()" title="Episodes" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="14" height="10" rx="2"/><path d="M7 5V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-1"/></svg>
+    </button>
+    <button id="serverBtn" class="server-cloud-btn" onclick="toggleServerMenu()" title="Server">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .3-9 7 7 0 0 0-13.6 1.7A4 4 0 0 0 6 19h11.5z"/></svg>
+      <span class="srv-dot cloud-live-dot" id="serverLiveDot"></span>
     </button>
     <button id="ccBtn" onclick="toggleSubtitleMenu()" title="Subtitles">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8l-6 4V6z"/><path d="M7 10.5h3.5M7 13.5h5.5M15.5 10.5H19M15.5 13.5H17"/></svg>
@@ -384,6 +464,10 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
   <div class="subtitle-popover" id="subtitleSub">
     <div class="subtitle-popover-header">Subtitles <span class="value" id="subtitleValue">Off</span></div>
     <div id="subtitleItems"></div>
+  </div>
+  <div class="subtitle-popover" id="serverPopover">
+    <div class="subtitle-popover-header">Server <span class="value" id="serverCloudValue">Auto</span></div>
+    <div id="serverCloudItems"></div>
   </div>
 </div>
 
@@ -457,28 +541,31 @@ function apiFetch(path, opts) {
 }
 const params = new URLSearchParams(location.search);
 const TMDB_ID = params.get('tmdb') || 550;
-const isTV = (params.get('type') || (params.get('season') !== null ? 'tv' : 'movie')) === 'tv';
+const isTV = (params.get('type') || '').toLowerCase() === 'tv';
+if (isTV) document.body.classList.add('is-tv');
+else document.body.classList.remove('is-tv', 'ep-open');
 let currentSeason = parseInt(params.get('season')) || 1;
 let currentEpisode = parseInt(params.get('episode')) || 1;
 let START_AT = parseFloat(params.get('t') || '0') || 0;
 const IS_GUEST = params.get('g') !== '0';
 let selectedServer = 'auto';
-let failedServers = [];
-let knownServers = [];
-let activeProvider = '';
-let failoverInProgress = false;
 const body = () => ({
   tmdb: TMDB_ID,
   type: isTV ? 'tv' : 'movie',
   season: currentSeason,
   episode: currentEpisode,
   server: selectedServer && selectedServer !== 'auto' ? selectedServer : undefined,
-  exclude: failedServers.length ? failedServers.slice() : undefined
+  exclude: autoExclude.size ? Array.from(autoExclude) : undefined
 });
+var autoExclude = new Set();
+var badHeights = new Set();
+var activeResume = null;
+var currentPlaylist = '';
 const GUEST_RESUME_TTL = 7 * 24 * 60 * 60 * 1000;
 const GUEST_CONTINUE_KEY = 'flixstream:guest-continue:v1';
 let showTitle = '';
 let posterPath = '';
+let originalLanguage = '';
 let seasonsList = [];
 let episodesList = [];
 let episodesOpen = false;
@@ -503,13 +590,14 @@ if (IS_GUEST) {
 }
 
 function goBack() {
+  const from = params.get('from') || (isTV ? ('/tvshows/' + TMDB_ID) : ('/movie/' + TMDB_ID));
   try {
     if (window.top && window.top !== window) {
-      window.top.history.back();
+      window.top.location.href = from;
       return;
     }
   } catch (_) {}
-  history.back();
+  location.href = from;
 }
 
 // ── DOM Refs ──
@@ -530,6 +618,7 @@ const progressThumb = document.getElementById('progressThumb');
 const bufferBar = document.getElementById('bufferBar');
 const progressWrap = document.getElementById('progressWrap');
 const timeLabel = document.getElementById('timeLabel');
+const timeLabelM = document.getElementById('timeLabelM');
 const volumeSlider = document.getElementById('volumeSlider');
 const volumeIcon = document.getElementById('volumeIcon');
 const titleText = document.getElementById('titleText');
@@ -543,6 +632,10 @@ const qualitySub = document.getElementById('qualitySub');
 const qualityValue = document.getElementById('qualityValue');
 const serverSub = document.getElementById('serverSub');
 const serverValue = document.getElementById('serverValue');
+const serverPopover = document.getElementById('serverPopover');
+const serverCloudItems = document.getElementById('serverCloudItems');
+const serverCloudValue = document.getElementById('serverCloudValue');
+const serverBtn = document.getElementById('serverBtn');
 const subtitleSub = document.getElementById('subtitleSub');
 const subtitleItems = document.getElementById('subtitleItems');
 const subtitleValue = document.getElementById('subtitleValue');
@@ -579,52 +672,13 @@ let subtitleList = [];
 let subtitleCues = [];
 let currentSubIdx = -1;
 let attempt = 0;
-// Always proxy via /api/cjproxy — CDN hosts lack CORS and break HLS.js in the browser.
-let useDirect = false;
 let seeking = false;
-let streamTries = 0;
-const MAX_STREAM_TRIES = 10;
-const STATUS_FAILOVER = ['Trying another server...','Switching source...','Finding a working stream...'];
-
-function markServerFailed(name) {
-  if (!name) return;
-  const n = String(name);
-  if (!failedServers.some(s => s.toLowerCase() === n.toLowerCase())) failedServers.push(n);
-}
-
-function nextFailoverServer() {
-  const failed = new Set(failedServers.map(s => s.toLowerCase()));
-  if (activeProvider) failed.add(String(activeProvider).toLowerCase());
-  for (const s of knownServers) {
-    const name = s && (s.name || s);
-    if (!name) continue;
-    if (failed.has(String(name).toLowerCase())) continue;
-    if (s.status && s.status !== 'ok') continue;
-    return String(name);
-  }
-  return null;
-}
-
-function failoverToNextServer(reason) {
-  if (failoverInProgress) return false;
-  if (streamTries >= MAX_STREAM_TRIES) return false;
-  markServerFailed(activeProvider);
-  const next = nextFailoverServer();
-  // Even without a named next server, keep going in auto with excludes if we haven't exhausted tries.
-  if (!next && failedServers.length === 0) return false;
-  if (!next && streamTries >= 3) return false;
-  failoverInProgress = true;
-  console.warn('stream failover:', reason || 'error', '->', next || 'auto', 'failed:', failedServers.join(','));
-  setStatus(STATUS_FAILOVER);
-  loading.classList.remove('hidden');
-  errorScreen.classList.remove('show');
-  selectedServer = 'auto';
-  attempt = 0;
-  useDirect = false;
-  failoverInProgress = false;
-  loadStream();
-  return true;
-}
+let liveServer = '';
+let knownServers = [];
+let failedServers = new Set();
+let switchingServer = false;
+let pendingSeek = null;
+let checkingServer = '';
 
 // ── Controls Show/Hide ──
 function showControls() {
@@ -640,6 +694,7 @@ function hideControls() {
   if (video.paused) return;
   if (isSettingsOpen) return;
   if (subtitleSub.classList.contains('open')) return;
+  if (serverPopover && serverPopover.classList.contains('open')) return;
   if (seasonMenu.classList.contains('open')) return;
   topBar.classList.remove('visible');
   bottomControls.classList.remove('visible');
@@ -707,7 +762,24 @@ function skip(sec) {
 
 // ── Volume ──
 function setVolume(v) { video.volume = v; video.muted = false; updateVolumeIcon(); }
-function toggleMute() { video.muted = !video.muted; updateVolumeIcon(); }
+function toggleMute() {
+  video.muted = !video.muted;
+  if (!video.muted && video.volume === 0) video.volume = 1;
+  updateVolumeIcon();
+}
+function togglePip() {
+  try {
+    if (document.pictureInPictureElement) document.exitPictureInPicture();
+    else if (video.requestPictureInPicture) video.requestPictureInPicture();
+    else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode(video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+  } catch (_) {}
+  showControls();
+}
+(function initPip() {
+  const b = document.getElementById('pipBtn');
+  const ok = (document.pictureInPictureEnabled && video.requestPictureInPicture) || (video.webkitSupportsPresentationMode && video.webkitSupportsPresentationMode('picture-in-picture'));
+  if (b && ok) b.hidden = false;
+})();
 function updateVolumeIcon() {
   const v = video.muted ? 0 : video.volume;
   volumeSlider.value = v;
@@ -729,6 +801,7 @@ function updateTimeLabel() {
   const dur = video.duration;
   const cur = video.currentTime || 0;
   timeLabel.textContent = formatTime(cur) + ' / ' + formatTime(dur);
+  timeLabelM.textContent = formatTime(cur);
 }
 
 video.addEventListener('timeupdate', () => {
@@ -791,10 +864,20 @@ function formatTime(t) {
 
 // ── Fullscreen ──
 function toggleFullscreen() {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else document.documentElement.requestFullscreen();
+  var videoEl = document.getElementById('video');
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } else {
+    if (videoEl.webkitEnterFullscreen) { videoEl.webkitEnterFullscreen(); }
+    else if (videoEl.requestFullscreen) videoEl.requestFullscreen();
+    else if (videoEl.webkitRequestFullscreen) videoEl.webkitRequestFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    else if (document.documentElement.webkitRequestFullscreen) document.documentElement.webkitRequestFullscreen();
+  }
 }
 document.addEventListener('fullscreenchange', () => showControls());
+document.addEventListener('webkitbeginfullscreen', () => showControls());
 
 // ── Keyboard ──
 document.addEventListener('keydown', e => {
@@ -814,14 +897,37 @@ document.addEventListener('keydown', e => {
 function toggleSettings() {
   isSettingsOpen = !isSettingsOpen;
   settingsPanel.classList.toggle('open', isSettingsOpen);
-  if (isSettingsOpen) { subtitleSub.classList.remove('open'); clearTimeout(controlsTimer); }
+  if (isSettingsOpen) {
+    subtitleSub.classList.remove('open');
+    if (serverPopover) serverPopover.classList.remove('open');
+    if (serverBtn) serverBtn.classList.remove('active');
+    clearTimeout(controlsTimer);
+  }
   else showControls();
 }
 
 function toggleSubtitleMenu() {
   const open = !subtitleSub.classList.contains('open');
   subtitleSub.classList.toggle('open', open);
-  if (open) { if (isSettingsOpen) toggleSettings(); clearTimeout(controlsTimer); }
+  if (open) {
+    if (isSettingsOpen) toggleSettings();
+    if (serverPopover) serverPopover.classList.remove('open');
+    if (serverBtn) serverBtn.classList.remove('active');
+    clearTimeout(controlsTimer);
+  }
+  else showControls();
+}
+
+function toggleServerMenu() {
+  if (!serverPopover) return;
+  const open = !serverPopover.classList.contains('open');
+  serverPopover.classList.toggle('open', open);
+  if (serverBtn) serverBtn.classList.toggle('active', open);
+  if (open) {
+    if (isSettingsOpen) toggleSettings();
+    subtitleSub.classList.remove('open');
+    clearTimeout(controlsTimer);
+  }
   else showControls();
 }
 
@@ -947,15 +1053,18 @@ function buildSubtitleMenu() {
 }
 
 function loadSubtitle(sub) {
+  if (!sub || !sub.url) return Promise.reject(new Error('No subtitle url'));
   if (sub.url.startsWith('data:')) {
     const m = sub.url.match(/^data:text\/vtt;base64,(.*)$/s);
     if (!m) return Promise.reject(new Error('Bad data URI'));
     return Promise.resolve(atob(m[1]));
   }
-  return apiFetch('/api/subtitle?url=' + encodeURIComponent(sub.url)).then(r => {
+  const ctrl = new AbortController();
+  const timer = setTimeout(function () { ctrl.abort(); }, 12000);
+  return apiFetch('/api/subtitle?url=' + encodeURIComponent(sub.url), { signal: ctrl.signal }).then(r => {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.text();
-  });
+  }).finally(function () { clearTimeout(timer); });
 }
 
 function selectExternalSubtitle(sub, btn) {
@@ -969,7 +1078,9 @@ function selectExternalSubtitle(sub, btn) {
   btn.classList.add('checking');
   subtitleValue.textContent = 'Loading...';
   loadSubtitle(sub).then(vtt => {
-    subtitleCues = parseVTT(vtt);
+    const cues = parseVTT(vtt);
+    if (!cues.length) throw new Error('Empty subtitles');
+    subtitleCues = cues;
     currentSubIdx = parseInt(btn.dataset.subIdx);
     btn.classList.remove('checking');
     btn.classList.add('active');
@@ -1012,7 +1123,9 @@ function autoSelectEnglishSubtitle() {
     if (n >= ranked.length) return;
     const pick = ranked[n];
     loadSubtitle(pick.s).then(function (vtt) {
-      subtitleCues = parseVTT(vtt);
+      const cues = parseVTT(vtt);
+      if (!cues.length) throw new Error('Empty subtitles');
+      subtitleCues = cues;
       currentSubIdx = pick.i;
       subtitleValue.textContent = (pick.s.display || langName(pick.s)).replace(/#\d+$/, '');
       ccBtn.classList.add('active');
@@ -1021,10 +1134,36 @@ function autoSelectEnglishSubtitle() {
         subtitleItems.querySelectorAll('.subtitle-item').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
       }
+      // Enable native <track> for mobile/iOS/Android native fullscreen CC support
+      enableNativeSubtitles(vtt, pick.s.language || 'en', (pick.s.display || langName(pick.s)).replace(/#\d+$/, ''));
     }).catch(function () { tryAt(n + 1); });
-  };
-  tryAt(0);
-}
+    };
+    tryAt(0);
+    }
+
+    // Enable native HTML5 <track> so mobile/iOS/Android native fullscreen shows CC
+    function enableNativeSubtitles(vttText, language, label) {
+    var existing = video.querySelector('track[data-native-cc]');
+    if (existing) existing.remove();
+    var blob = new Blob([vttText], { type: 'text/vtt' });
+    var url = URL.createObjectURL(blob);
+    var trackEl = document.createElement('track');
+    trackEl.kind = 'captions';
+    trackEl.label = label;
+    trackEl.srclang = language;
+    trackEl.src = url;
+    trackEl.default = true;
+    trackEl.setAttribute('data-native-cc', 'true');
+    video.appendChild(trackEl);
+    trackEl.addEventListener('load', function () {
+    for (var i = 0; i < video.textTracks.length; i++) {
+    var t = video.textTracks[i];
+    if (t.kind === 'captions' && t.language === language) {
+      t.mode = 'showing';
+    }
+    }
+    });
+    }
 
 // Subtitle rendering via timeupdate
 video.addEventListener('timeupdate', () => {
@@ -1045,9 +1184,8 @@ video.addEventListener('timeupdate', () => {
 
 // ── Theme ──
 function selectTheme(name, btn) {
-  const body = document.body;
-  body.className = body.className.replace(/theme-\w+/g, '').trim();
-  if (name !== 'dark') body.classList.add('theme-' + name);
+  document.body.classList.remove('theme-light', 'theme-purple', 'theme-ocean');
+  if (name !== 'dark') document.body.classList.add('theme-' + name);
   const labels = {dark:'Dark', light:'Light', purple:'Purple', ocean:'Ocean'};
   themeValue.textContent = labels[name] || name;
   themeSub.querySelectorAll('.submenu-item').forEach(b => b.classList.remove('active'));
@@ -1061,163 +1199,489 @@ function loadTheme() {
   else selectTheme('dark', themeSub.querySelector('.submenu-item'));
 }
 
-function selectServer(name, btn) {
-  selectedServer = name || 'auto';
-  failedServers = [];
-  activeProvider = '';
-  serverSub.querySelectorAll('.submenu-item').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active', 'working');
-  if (name === 'auto') serverValue.textContent = 'Auto';
-  else serverValue.textContent = name;
-  retry();
-}
-
-function buildServerMenu(servers, activeName) {
-  knownServers = Array.isArray(servers) ? servers.slice() : [];
-  activeProvider = activeName || '';
-  serverSub.innerHTML = '';
-  const auto = document.createElement('button');
-  auto.className = 'submenu-item' + (selectedServer === 'auto' ? ' active working' : '');
-  auto.innerHTML = '<span class="check"></span>Auto';
-  auto.onclick = () => selectServer('auto', auto);
-  serverSub.appendChild(auto);
-  if (activeName) serverValue.textContent = selectedServer === 'auto' ? ('Auto · ' + activeName) : activeName;
-  (servers || []).forEach(s => {
-    const b = document.createElement('button');
-    const isActive = s.active || (activeName && s.name === activeName);
-    b.className = 'submenu-item' + (isActive && selectedServer !== 'auto' ? ' active working' : (isActive ? ' working' : ''));
-    const check = document.createElement('span');
-    check.className = 'check';
-    b.appendChild(check);
-    b.appendChild(document.createTextNode(String(s.name || 'Server')));
-    if (!isActive) {
-      const dot = document.createElement('span');
-      dot.className = 'srv-dot';
-      dot.title = String(s.status || 'ok');
-      b.appendChild(dot);
-    }
-    b.onclick = () => selectServer(s.name, b);
-    serverSub.appendChild(b);
-  });
-}
-
-// ── Load Stream ──
 function destroyHls() {
+  stopWatchdog();
   if (hls) { hls.destroy(); hls = null; }
   video.src = '';
   setProgress(0);
   bufferBar.style.width = '0';
   timeLabel.textContent = '0:00 / 0:00';
+  timeLabelM.textContent = '0:00';
 }
 
 function startPlayback() {
   video.muted = true;
-  const resumeAt = consumeResumeTime();
-  if (resumeAt > 0 && isFinite(video.duration) && resumeAt < video.duration - 5) {
-    video.currentTime = resumeAt;
-  }
+  const resumeAt = pendingSeek != null ? pendingSeek : consumeResumeTime();
+  pendingSeek = null;
+  const applySeek = () => {
+    if (!(resumeAt > 1)) return;
+    if (isFinite(video.duration) && video.duration > 0) {
+      if (resumeAt < video.duration - 5) video.currentTime = resumeAt;
+      return;
+    }
+    video.addEventListener('loadedmetadata', applySeek, { once: true });
+  };
+  applySeek();
   video.play().catch(() => {});
   updateVolumeIcon();
 }
 
-async function loadStream() {
-  if (streamTries >= MAX_STREAM_TRIES) {
-    showError('No working stream found');
-    return;
-  }
-  streamTries++;
-  destroyHls();
-  loading.classList.remove('hidden');
-  errorScreen.classList.remove('show');
-  setStatus(failedServers.length ? STATUS_FAILOVER : STATUS.resolve);
+function hasWorkingPlayback() {
+  if (errorScreen.classList.contains('show')) return false;
+  if (video.error) return false;
+  return Boolean(hls || (video.src && video.readyState >= 1));
+}
 
+function setLiveServer(name, servers) {
+  liveServer = name || liveServer || 'auto';
+  if (Array.isArray(servers) && servers.length) knownServers = servers;
+  serverValue.textContent = liveServer && liveServer !== 'auto' ? liveServer : 'Auto';
+  if (serverCloudValue) serverCloudValue.textContent = serverValue.textContent;
+  if (serverBtn) serverBtn.classList.toggle('live', Boolean(liveServer && liveServer !== 'auto'));
+  buildServerMenu(knownServers, liveServer, checkingServer);
+}
+
+function fillServerList(container, servers, activeName, checkingName) {
+  if (!container) return;
+  container.innerHTML = '';
+  const makeItem = (name, label, extraClass) => {
+    const b = document.createElement('button');
+    const isActive = Boolean(activeName) && name === activeName;
+    const isCheck = checkingName && name === checkingName;
+    const isFailed = failedServers.has(name);
+    b.className = 'submenu-item' + (isActive ? ' active live-server' : '') + (isCheck ? ' checking' : '') + (isFailed ? ' failed' : '') + (extraClass ? ' ' + extraClass : '');
+    b.type = 'button';
+    const check = document.createElement('span');
+    check.className = 'check';
+    b.appendChild(check);
+    b.appendChild(document.createTextNode(label));
+    const dot = document.createElement('span');
+    dot.className = 'srv-dot';
+    dot.title = isActive ? 'Playing' : 'Available';
+    if (name !== 'auto') b.appendChild(dot);
+    b.onclick = () => selectServer(name, b);
+    container.appendChild(b);
+  };
+  makeItem('auto', 'Auto');
+  (servers || []).forEach(s => {
+    const name = String(s.name || 'Server');
+    makeItem(name, name);
+  });
+}
+
+function buildServerMenu(servers, activeName, checkingName) {
+  const list = Array.isArray(servers) ? servers : knownServers;
+  fillServerList(serverSub, list, activeName, checkingName);
+  fillServerList(serverCloudItems, list, activeName, checkingName);
+}
+
+function needsApiHeader(url) {
+  const u = String(url || '');
+  return u.charAt(0) === '/' || u.indexOf('/api/') !== -1 || u.indexOf('flixstream.ca') !== -1;
+}
+
+async function playlistIsPlayable(playlistUrl) {
   try {
-    const resp = await apiFetch('/api/cinejoy', {
+    const resp = await fetch(playlistUrl, { headers: { 'X-Flix-Client': '1' }, credentials: 'omit' });
+    const text = await resp.text();
+    if (!resp.ok || text.indexOf('#EXTM3U') !== 0) return false;
+    const next = text.split('\n').map(l => l.trim()).find(l => l && l.charAt(0) !== '#');
+    if (!next) return false;
+    if (next.indexOf('.m3u8') !== -1 || next.indexOf('/api/cjproxy') !== -1) {
+      const nested = next.charAt(0) === '/' ? apiUrl(next) : next;
+      const headers = needsApiHeader(nested) ? { 'X-Flix-Client': '1' } : {};
+      const r2 = await fetch(nested, { headers: headers, credentials: 'omit' });
+      const t2 = await r2.text();
+      return r2.ok && t2.indexOf('#EXTM3U') === 0;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function playlistProblem(status, data) {
+  const code = data && data.code;
+  if (status === 451 || code === 'blocked') return 'this title is blocked by the source right now.';
+  if (status === 429) return 'too many requests, wait a minute and try again.';
+  if (code === 'no_source') return 'no source found for this title or episode.';
+  if (code === 'no_playable_playlist') return 'no source has a working playlist for this title right now (the provider is busy or still preparing it). Try again in a minute or pick another episode.';
+  if (status === 404 || status === 500) return 'no playable playlist found right now.';
+  return 'the stream server returned HTTP ' + status + '.';
+}
+
+async function fetchCinejoy(serverName) {
+  const payload = body();
+  payload.server = serverName && serverName !== 'auto' ? serverName : undefined;
+  const ctrl = new AbortController();
+  const timer = setTimeout(function () { ctrl.abort(); }, 75000);
+  let resp;
+  try {
+    resp = await apiFetch('/api/cinejoy', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(body())
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal
     });
-    const data = await resp.json();
-    if (!resp.ok || data.error) {
-      markServerFailed(activeProvider || selectedServer);
-      selectedServer = 'auto';
-      if (failoverToNextServer(data.error || 'resolve failed')) return;
-      throw new Error(data.error || 'Unknown error');
-    }
-    const stream = data.stream?.[0];
-    let playlist = stream?.playlist; // already proxied via /api/cjproxy
-    if (!playlist) {
-      markServerFailed(data.provider || activeProvider);
-      if (failoverToNextServer('no playlist')) return;
-      throw new Error('No stream available');
-    }
-    playlist = apiUrl(playlist);
-    buildServerMenu(data.servers, data.provider);
-    if (data.provider) activeProvider = data.provider;
-    if (data.subtitles) {
-      subtitleList = data.subtitles;
-      currentSubIdx = -1;
-      subtitleCues = [];
-      buildSubtitleMenu();
-      autoSelectEnglishSubtitle();
-    }
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(err && err.name === 'AbortError'
+      ? 'Playlist error: the stream server took too long to answer.'
+      : 'Playlist error: network error, could not reach the stream server.');
+  }
+  let data;
+  try { data = await resp.json(); } catch (err) {
+    clearTimeout(timer);
+    throw new Error('Playlist error: the stream server sent an unreadable reply (HTTP ' + resp.status + ').');
+  }
+  clearTimeout(timer);
+  if (!resp.ok || data.error) {
+    const e = new Error('Playlist error: ' + playlistProblem(resp.status, data));
+    e.noRetry = resp.status === 400 || resp.status === 451;
+    throw e;
+  }
+  const stream = data.stream && data.stream[0];
+  if (!stream || !stream.playlist) throw new Error('Playlist error: the server returned no playlist.');
+  return { data, stream, playlist: apiUrl(stream.playlist) };
+}
 
-    if (stream.kind === 'mp4') {
-      video.src = playlist;
-      video.addEventListener('loadedmetadata', () => {
-        loading.classList.add('hidden');
-        streamTries = 0;
-        startPlayback();
-        updateTitleCard();
-      }, { once: true });
-      video.addEventListener('error', () => {
-        destroyHls();
-        if (!failoverToNextServer('mp4 error')) showError('Stream error: media');
-      }, { once: true });
-      return;
-    }
+async function resolveCinejoy(serverName) {
+  const out = await fetchCinejoy(serverName);
+  const playable = await playlistIsPlayable(out.playlist);
+  if (!playable) throw new Error('CDN did not resolve');
+  return out;
+}
 
-    setStatus(STATUS.load);
-    hls = new Hls({
-      enableWorker: true,
-      xhrSetup: function (xhr) {
-        xhr.setRequestHeader('X-Flix-Client', '1');
+function applySubtitles(data) {
+  if (!data.subtitles) return;
+  subtitleList = data.subtitles;
+  currentSubIdx = -1;
+  subtitleCues = [];
+  buildSubtitleMenu();
+  autoSelectEnglishSubtitle();
+}
+
+function wireHls(playlist) {
+  const startAt = pendingSeek != null ? pendingSeek : peekResumeTime();
+  currentPlaylist = playlist;
+  hls = new Hls({
+    enableWorker: true,
+    startPosition: startAt > 1 ? startAt : -1,
+    maxBufferHole: 0.5,
+    fragLoadPolicy: {
+      default: {
+        maxTimeToFirstByteMs: 12000,
+        maxLoadTimeMs: 20000,
+        timeoutRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 },
+        errorRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 }
+      }
+    },
+    xhrSetup: function (xhr, url) {
+      if (needsApiHeader(url)) xhr.setRequestHeader('X-Flix-Client', '1');
+    }
+  });
+  activeResume = resumePast;
+  hls.loadSource(playlist);
+  hls.attachMedia(video);
+  hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    if (badHeights.size && hls.levels) {
+      for (let i = hls.levels.length - 1; i >= 0; i--) {
+        if (badHeights.has(hls.levels[i].height)) { try { hls.removeLevel(i); } catch (err) {} }
+      }
+    }
+    let startIdx = 0;
+    let startH = Infinity;
+    (hls.levels || []).forEach(function (level, i) {
+      const h = level.height || 0;
+      if (h && h < startH) { startH = h; startIdx = i; }
+    });
+    try { hls.currentLevel = startIdx; } catch (err) {}
+    hls.once(Hls.Events.FRAG_BUFFERED, function () {
+      if (currentQuality === 'auto') {
+        try { hls.currentLevel = -1; } catch (err) {}
       }
     });
-    // Prefer full proxy after the first failure — CDN direct mode often 403s.
-    const hlsPlaylist = useDirect && playlist.includes('/api/cjproxy?')
-      ? playlist + '&direct=1'
-      : playlist;
-    hls.loadSource(hlsPlaylist);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      buildQualityOptions(hls.levels);
-      startPlayback();
+    buildQualityOptions(hls.levels);
+    startPlayback();
+    loading.classList.add('hidden');
+    errorScreen.classList.remove('show');
+    updateTitleCard();
+  });
+  video.addEventListener('playing', function seekResumeOnce() {
+    const t = peekResumeTime();
+    if (t > 1 && Math.abs((video.currentTime || 0) - t) > 2.5) {
+      try { video.currentTime = t; } catch (e) {}
+    }
+  }, { once: true });
+  let holeCursor = 0;
+  function jumpPastHole() {
+    const ct = video.currentTime || 0;
+    let containingEnd = -1;
+    let ahead = -1;
+    for (let i = 0; i < video.buffered.length; i++) {
+      const start = video.buffered.start(i);
+      const end = video.buffered.end(i);
+      if (ct >= start - 0.05 && ct <= end + 0.2) containingEnd = end;
+      if (start > ct + 0.35 && (ahead < 0 || start < ahead)) ahead = start;
+    }
+    const stuckAtEnd = containingEnd >= 0 && (containingEnd - ct) < 0.9;
+    if (ahead >= 0 && (stuckAtEnd || containingEnd < 0)) {
+      try { video.currentTime = ahead + 0.05; } catch (err) {}
+    }
+  }
+  hls.on(Hls.Events.FRAG_BUFFERED, jumpPastHole);
+  video.addEventListener('waiting', jumpPastHole);
+  function resumePast(pos) {
+    const sc = hls && hls.streamController;
+    if (!sc) return;
+    // hls.startLoad() re-fetches the playlist. A 502 on that request is the
+    // "networkError" that appears after the clock has already started.
+    try { hls.started = true; } catch (err) {}
+    try { sc.startLoad(pos); } catch (err) {}
+    try { sc.nextLoadPosition = pos; } catch (err) {}
+    if (sc.state === 'STOPPED' || sc.state === 'ERROR') sc.state = 'IDLE';
+    try { sc.tick(); } catch (err) {}
+  }
+  const failedLevels = new Set();
+  let skipped = 0;
+  let consecMiss = 0;
+  let mediaRecovered = false;
+  hls.on(Hls.Events.FRAG_BUFFERED, function () { consecMiss = 0; });
+  hls.on(Hls.Events.ERROR, (e, ev) => {
+    const details = ev.details;
+    const fragMiss = details === Hls.ErrorDetails.FRAG_LOAD_ERROR
+      || details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT;
+    const playlistMiss = details === Hls.ErrorDetails.LEVEL_LOAD_ERROR
+      || details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT
+      || details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR
+      || details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT;
+    const playing = video.readyState >= 2 || video.currentTime > 1;
+    if (fragMiss) {
+      const frag = ev.frag;
+      if (frag && frag.sn === 'initSegment') {
+        const bad = hls.levels && hls.levels[frag.level];
+        badHeights.add(bad ? bad.height : frag.level);
+        const left = (hls.levels || []).filter(function (l) { return !badHeights.has(l.height); }).length;
+        if (left > 0) {
+          showWarn('The ' + (bad && bad.height ? bad.height + 'p ' : '') + 'quality is unavailable, switching to another...', 6000);
+          restartHls();
+          return;
+        }
+        recoverOrFail('Playback error: none of the qualities could start (setup file missing on every rendition).');
+        return;
+      }
+      skipped++;
+      consecMiss++;
+      if (consecMiss >= (playing ? 8 : 4)) {
+        recoverOrFail('Playback error: the video parts keep failing to load (' + consecMiss + ' in a row).');
+        return;
+      }
+      showWarn('Some video parts are unavailable, skipping ahead' + (skipped > 2 ? ' (' + skipped + ' skipped)' : '') + '...', 4500);
+      let pos = (video.currentTime || 0) + 10.5;
+      if (frag) {
+        const start = typeof frag.start === 'number' ? frag.start : (video.currentTime || 0);
+        pos = start + (frag.duration || 10.5) + 0.05;
+        frag.gap = true;
+        if (!frag.tagList) frag.tagList = [];
+        if (!frag.tagList.some(function (t) { return t[0] === 'GAP'; })) frag.tagList.push(['GAP']);
+        try { hls.streamController.fragmentTracker.fragBuffered(frag, true); } catch (err) {}
+      }
+      holeCursor = Math.max(holeCursor, pos);
+      resumePast(holeCursor);
+      jumpPastHole();
+      return;
+    }
+    const havePlaylist = hls.levels && hls.levels.some(function (level) { return level && level.details; });
+    if (playlistMiss && havePlaylist) {
+      const keep = hls.levels.findIndex(function (level) { return level && level.details; });
+      if (keep >= 0) { try { hls.currentLevel = keep; } catch (err) {} }
+      showWarn('A quality playlist failed to load, staying on the working one.', 5000);
+      resumePast(video.currentTime > 0.5 ? video.currentTime : holeCursor || -1);
+      return;
+    }
+    if (!ev.fatal) return;
+    if (ev.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
+      mediaRecovered = true;
+      showWarn('Video decode hiccup, recovering...', 4000);
+      try { hls.recoverMediaError(); return; } catch (err) {}
+    }
+    if (playing) {
+      showWarn('Connection hiccup, recovering...', 4000);
+      resumePast(video.currentTime || holeCursor || -1);
+      return;
+    }
+    if (playlistMiss) {
+      recoverOrFail('Playlist error: the video playlist failed to load (' + details + ').');
+    } else if (ev.type === Hls.ErrorTypes.MEDIA_ERROR) {
+      recoverOrFail('Playback error: the video could not be decoded (' + details + ').');
+    } else {
+      recoverOrFail('Playback error: network error while loading the video (' + details + ').');
+    }
+  });
+  startWatchdog();
+}
+
+let wdTimer = null;
+let wdSince = 0;
+let wdLastTime = -1;
+let wdStage = 0;
+function stopWatchdog() { clearInterval(wdTimer); wdTimer = null; }
+function restartHls() {
+  if (!currentPlaylist) return;
+  const at = video.currentTime || 0;
+  destroyHls();
+  pendingSeek = at > 1 ? at : null;
+  wireHls(currentPlaylist);
+}
+function startWatchdog() {
+  stopWatchdog();
+  wdSince = Date.now();
+  wdLastTime = -1;
+  wdStage = 0;
+  wdTimer = setInterval(function () {
+    if (!hls || errorScreen.classList.contains('show')) return;
+    const now = Date.now();
+    const ct = video.currentTime || 0;
+    const parked = video.paused && video.readyState >= 3;
+    if (parked || video.ended || Math.abs(ct - wdLastTime) > 0.3) {
+      wdLastTime = ct;
+      wdSince = now;
+      wdStage = 0;
+      if (ct > 3) attempt = 0;
+      if (warnSticky) hideWarn();
+      return;
+    }
+    const idle = (now - wdSince) / 1000;
+    const started = ct > 1;
+    if (idle > 8 && wdStage === 0) {
+      wdStage = 1;
+      showWarn(started ? 'Slow connection, still buffering...' : 'The source is slow to start, still trying...', 0);
+    } else if (idle > 14 && wdStage === 1) {
+      wdStage = 2;
+      showWarn('Video is stuck, trying to recover...', 0);
+      if (activeResume) activeResume(ct > 0.5 ? ct : -1);
+    } else if (idle > 22 && wdStage === 2) {
+      wdStage = 3;
+      showWarn('Still stuck, restarting the video...', 0);
+      restartHls();
+    } else if (idle > 40 && wdStage === 3) {
+      recoverOrFail('Playback error: the video stopped loading (no data for ' + Math.round(idle) + 's).');
+    }
+  }, 1000);
+}
+
+function recoverOrFail(msg) {
+  const failedOn = liveServer && liveServer !== 'auto' ? liveServer : '';
+  destroyHls();
+  if (attempt < 2) {
+    attempt++;
+    if (failedOn) autoExclude.add(failedOn);
+    selectedServer = 'auto';
+    showWarn('Playback failed on this source, trying another (' + attempt + '/2)...', 9000);
+    loadStream(0);
+    return;
+  }
+  showError(msg);
+}
+
+function playResolved(stream, playlist) {
+  if (stream.kind === 'mp4') {
+    video.src = playlist;
+    video.addEventListener('loadedmetadata', () => {
       loading.classList.add('hidden');
-      streamTries = 0;
+      errorScreen.classList.remove('show');
+      startPlayback();
       updateTitleCard();
-    });
-    hls.on(Hls.Events.ERROR, (e, ev) => {
-      if (!ev.fatal) return;
-      destroyHls();
-      // Switch to next available server with a working m3u8 (already fully proxied).
-      if (failoverToNextServer(ev.type || 'networkError')) return;
-      showError('Stream error: ' + ev.type);
-    });
+    }, { once: true });
+    return;
+  }
+  setStatus(STATUS.load);
+  wireHls(playlist);
+}
+
+function selectServer(name) {
+  const want = name || 'auto';
+  if (switchingServer) return;
+  if (want === liveServer || (want === 'auto' && liveServer && selectedServer === 'auto')) {
+    buildServerMenu(knownServers, liveServer, '');
+    return;
+  }
+  if (hasWorkingPlayback()) {
+    void switchServer(want);
+    return;
+  }
+  selectedServer = want;
+  retry();
+}
+
+async function switchServer(name) {
+  if (switchingServer) return;
+  switchingServer = true;
+  checkingServer = name;
+  buildServerMenu(knownServers, liveServer, name);
+  try {
+    const { data, stream, playlist } = await resolveCinejoy(name);
+    failedServers.delete(name);
+    selectedServer = name;
+    const keepAt = video.currentTime || 0;
+    pendingSeek = keepAt > 1 ? keepAt : null;
+    attempt = 0;
+    destroyHls();
+    playResolved(stream, playlist);
+    applySubtitles(data);
+    setLiveServer(data.provider || name, data.servers);
   } catch (e) {
-    markServerFailed(activeProvider);
-    if (failoverToNextServer(e.message)) return;
-    showError(e.message);
+    if (name && name !== 'auto') failedServers.add(name);
+    checkingServer = '';
+    setLiveServer(liveServer, knownServers);
+  } finally {
+    switchingServer = false;
+    checkingServer = '';
+    buildServerMenu(knownServers, liveServer, '');
   }
 }
 
-function retry() {
-  attempt = 0;
-  useDirect = false;
-  streamTries = 0;
-  failedServers = [];
-  loadStream();
+let loadToken = 0;
+const RESOLVE_TRIES = 2;
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+async function loadStream(tryNo) {
+  tryNo = typeof tryNo === 'number' ? tryNo : 0;
+  const token = ++loadToken;
+  stopWatchdog();
+  loading.classList.remove('hidden');
+  errorScreen.classList.remove('show');
+  setStatus(STATUS.resolve);
+  const slowTimer = setTimeout(function () {
+    if (token === loadToken && !errorScreen.classList.contains('show')) {
+      showWarn('The source is slow to answer, still looking for a working playlist...', 0);
+    }
+  }, 15000);
+  try {
+    const { data, stream, playlist } = await fetchCinejoy(selectedServer);
+    clearTimeout(slowTimer);
+    if (token !== loadToken) return;
+    if (warnSticky) hideWarn();
+    badHeights.clear();
+    destroyHls();
+    applySubtitles(data);
+    setLiveServer(data.provider || selectedServer, data.servers);
+    playResolved(stream, playlist);
+  } catch (e) {
+    clearTimeout(slowTimer);
+    if (token !== loadToken) return;
+    if (!e.noRetry && tryNo < RESOLVE_TRIES - 1) {
+      showWarn((e.message || 'Playlist error').replace(/^Playlist error:\s*/, 'Playlist problem: ') +
+        ' Retrying (' + (tryNo + 2) + '/' + RESOLVE_TRIES + ')...', 9000);
+      await sleep(1200 * (tryNo + 1));
+      if (token !== loadToken) return;
+      return loadStream(tryNo + 1);
+    }
+    showError(e.message || 'Playlist error: stream unavailable.');
+  }
 }
+
+function retry() { attempt = 0; autoExclude.clear(); loadStream(); }
 
 function buildQualityOptions(levels) {
   qualitySub.innerHTML = '';
@@ -1238,7 +1702,29 @@ function buildQualityOptions(levels) {
   });
 }
 
+let warnTimer = null;
+let warnSticky = false;
+function showWarn(msg, ms) {
+  const el = document.getElementById('warnBanner');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  warnSticky = !ms;
+  clearTimeout(warnTimer);
+  if (ms) warnTimer = setTimeout(function () { el.classList.remove('show'); }, ms);
+}
+function hideWarn() {
+  const el = document.getElementById('warnBanner');
+  if (el) el.classList.remove('show');
+  warnSticky = false;
+  clearTimeout(warnTimer);
+}
+
 function showError(msg) {
+  hideWarn();
+  stopWatchdog();
+  const heading = errorScreen.querySelector('h2');
+  if (heading) heading.textContent = /^Playlist/i.test(String(msg)) ? 'Playlist Error' : 'Playback Error';
   loading.classList.add('hidden');
   errorText.textContent = msg;
   errorScreen.classList.add('show');
@@ -1310,6 +1796,7 @@ async function loadMeta() {
     applyMeta(m);
     showTitle = (m && m.title) || showTitle;
     if (m && typeof m.posterPath === 'string') posterPath = m.posterPath;
+    if (m && typeof m.original_language === 'string') originalLanguage = m.original_language;
     updatePlayingLabel();
     if (isTV) renderEpisodeData(m);
   } catch (_) {}
@@ -1340,18 +1827,23 @@ function readGuestResume() {
   return 0;
 }
 
-function consumeResumeTime() {
-  if (!urlResumeUsed && START_AT > 10) {
-    urlResumeUsed = true;
-    return START_AT;
-  }
+function peekResumeTime() {
+  if (pendingSeek != null && pendingSeek > 1) return pendingSeek;
+  if (START_AT > 1) return START_AT;
   var mem = sessionResume[resumeKey()];
   if (mem) {
     var memT = Number(mem.resumeTimeSeconds) || 0;
-    if (memT > 10) return memT;
+    if (memT > 1) return memT;
   }
   if (IS_GUEST) return readGuestResume();
   return 0;
+}
+
+function consumeResumeTime() {
+  var t = peekResumeTime();
+  if (t > 1) urlResumeUsed = true;
+  pendingSeek = null;
+  return t;
 }
 
 function notifyParent(payload) {
@@ -1384,6 +1876,7 @@ function persistProgress() {
         posterPath: posterPath || '',
         season: isTV ? currentSeason : undefined,
         episode: isTV ? currentEpisode : undefined,
+        originalLanguage: originalLanguage || '',
         watchDuration: watchDuration,
         totalDuration: totalDuration,
         resumeTimeSeconds: resumeTimeSeconds,
@@ -1400,6 +1893,7 @@ function persistProgress() {
     mediaType: isTV ? 'tv' : 'movie',
     title: showTitle || titleName.textContent || '',
     posterPath: posterPath,
+    originalLanguage: originalLanguage || '',
     watchDuration: watchDuration,
     totalDuration: totalDuration,
     resumeTimeSeconds: resumeTimeSeconds,
@@ -1442,6 +1936,12 @@ function scrollCurrentEpisode() {
 }
 
 function renderEpisodeData(m) {
+  if (!isTV) {
+    epBtn.hidden = true;
+    episodesOpen = false;
+    document.body.classList.remove('ep-open');
+    return;
+  }
   seasonsList = (m && m.seasons) || seasonsList || [];
   episodesList = (m && m.episodes) || [];
   epBtn.hidden = false;
@@ -1534,6 +2034,8 @@ function pickSeason(n) {
   seasonMenu.classList.remove('open');
   if (n === currentSeason) return;
   persistProgress();
+  destroyHls();
+  pendingSeek = null;
   currentSeason = n;
   currentEpisode = 1;
   START_AT = 0;
@@ -1547,6 +2049,8 @@ function pickSeason(n) {
 function pickEpisode(n) {
   if (n === currentEpisode) return;
   persistProgress();
+  destroyHls();
+  pendingSeek = null;
   currentEpisode = n;
   START_AT = 0;
   urlResumeUsed = true;
