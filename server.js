@@ -604,6 +604,51 @@ function headOk(url) {
     });
 }
 
+// Hosts that answer a browser at flixstream.ca (CORS allowed). Others only accept the
+// cinejoy.pk Origin, so their segments must go through /api/cjproxy.
+const corsHostCache = new Map();
+function hostAllowsFlixOrigin(url) {
+    let host;
+    try { host = new URL(url).hostname; } catch (e) { return Promise.resolve(false); }
+    const cached = corsHostCache.get(host);
+    if (cached && Date.now() - cached.at < (cached.ok ? 30 * 60 * 1000 : 3 * 60 * 1000)) return Promise.resolve(cached.ok);
+    return new Promise((resolve) => {
+        const child = spawn('/usr/bin/curl', [
+            '-sS', '-D', '-', '-o', '/dev/null', '--max-time', '8',
+            '-X', 'GET', '-H', 'Range: bytes=0-0',
+            '-H', 'Origin: https://flixstream.ca',
+            url,
+        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+        let out = '';
+        const done = (ok, cache) => {
+            clearTimeout(timer);
+            if (cache) corsHostCache.set(host, { ok, at: Date.now() });
+            resolve(ok);
+        };
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} done(false, false); }, 9000);
+        child.stdout.on('data', (d) => { out += d.toString(); });
+        child.on('error', () => done(false, false));
+        child.on('close', () => {
+            const status = parseInt((out.match(/^HTTP\/[\d.]+\s+(\d{3})/m) || [])[1], 10) || 0;
+            const acao = /^access-control-allow-origin:\s*(\*|https:\/\/flixstream\.ca)/mi.test(out);
+            // 502/5xx are the CDN's flaky segments, not a CORS verdict; do not cache those.
+            if (status >= 500 || status === 0) return done(false, false);
+            done(status >= 200 && status < 300 && acao, true);
+        });
+    });
+}
+
+async function segmentsDirectOk(playlistText, playlistUrl) {
+    const lines = String(playlistText || '').split('\n').map((l) => l.trim());
+    const first = lines.find((l) => l && !l.startsWith('#'));
+    const mapUri = (String(playlistText).match(/URI="([^"]+)"/) || [])[1];
+    const pick = first || mapUri;
+    if (!pick) return false;
+    let abs;
+    try { abs = new URL(pick, playlistUrl.href).href; } catch (e) { return false; }
+    return hostAllowsFlixOrigin(abs);
+}
+
 /** A rendition is playable when its playlist and first segment answer 2xx. */
 async function renditionPlayable(mediaPlaylistUrl) {
     const cached = renditionCache.get(mediaPlaylistUrl);
@@ -1215,7 +1260,17 @@ const server = http.createServer(async (req, res) => {
             };
             const subP = fetchWingSubtitles(isTv, tmdb, season, episode);
             // Auto: walk every server until a live m3u8 is confirmed. Never return a dead URL.
-            const info = await resolveCinejoyPreferClean(cj, isTv ? 'tv' : 'movie', resolveCtx, preferred || '', exclude);
+            const mediaKind = isTv ? 'tv' : 'movie';
+            let info;
+            try {
+                info = await resolveCinejoyPreferClean(cj, mediaKind, resolveCtx, preferred || '', exclude);
+            } catch (firstErr) {
+                // Excluding a server only helps if another one works. Without an exclusion
+                // the client already retries, so fail fast instead of doubling the wait.
+                if (!normalizeExcludeList(exclude).size) throw firstErr;
+                console.error('cinejoy retry without exclusions after', String(firstErr && firstErr.message || firstErr).slice(0, 120));
+                info = await resolveCinejoyPreferClean(cj, mediaKind, resolveCtx, preferred || '', []);
+            }
             const subRes = await subP;
             if (!info || !looksLikeStreamUrl(info.url)) throw new Error('Resolve returned no stream URL');
             let sniff = info._playable && info._playable.kind
@@ -1263,7 +1318,11 @@ const server = http.createServer(async (req, res) => {
             const status = cinejoyFailStatus(e);
             void notifyTelegram('API resolving failed.\nHTTP ' + status + '\n' + String(e.message || '').slice(0, 200));
             res.writeHead(status, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Unavailable', status: 'fail' }));
+            const reason = String(e.message || '');
+            const code = /No source found/i.test(reason) ? 'no_source'
+                : /No playable|not playable|playlist probe/i.test(reason) ? 'no_playable_playlist'
+                : status === 451 ? 'blocked' : 'upstream';
+            res.end(JSON.stringify({ error: 'Unavailable', status: 'fail', code }));
         }
         return;
     }
@@ -1417,9 +1476,9 @@ const server = http.createServer(async (req, res) => {
                     playlistText = filtered.text;
                 }
                 // Masters stay on /api/cjproxy (the CDN playlist itself often 502s
-                // in the browser). Segment URLs go direct to the CDN, which allows
-                // every origin, matching cinejoy.pk.
-                const rewritten = rewritePlaylist(playlistText, targetUrl, !isMaster);
+                // in the browser). Segment URLs go direct only when the CDN allows a
+                // flixstream.ca origin (like cinejoy.pk does); otherwise they are proxied.
+                const rewritten = rewritePlaylist(playlistText, targetUrl, !isMaster && await segmentsDirectOk(playlistText, targetUrl));
                 res.writeHead(up.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
@@ -1445,7 +1504,26 @@ const server = http.createServer(async (req, res) => {
         };
         if (req.headers.range) hdrs['Range'] = req.headers.range;
         try {
-            const proxyRes = await fetch(target, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+            // Upstream segments sometimes hang or 502 once and then work. A short first
+            // attempt plus one retry keeps playback moving instead of burning 20s per gap.
+            let proxyRes = null;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), attempt === 0 ? 7000 : 12000);
+                try {
+                    proxyRes = await fetch(target, { headers: hdrs, signal: ctrl.signal });
+                    clearTimeout(timer);
+                    if (proxyRes.ok || proxyRes.status === 206 || proxyRes.status < 500) {
+                        setTimeout(() => ctrl.abort(), 30000).unref();
+                        break;
+                    }
+                    try { await proxyRes.body.cancel(); } catch (_) {}
+                } catch (e) {
+                    clearTimeout(timer);
+                    proxyRes = null;
+                }
+            }
+            if (!proxyRes) { res.writeHead(404, corsHdrs); res.end(); return; }
             if (proxyRes.status === 451 || proxyRes.status === 403) {
                 markHostBlocked(targetUrl.hostname);
             }
@@ -1473,7 +1551,7 @@ const server = http.createServer(async (req, res) => {
                     text += Buffer.from(value).toString('latin1');
                 }
                 const isMaster = /#EXT-X-STREAM-INF:/i.test(text);
-                const rewritten = rewritePlaylist(text, targetUrl, !isMaster);
+                const rewritten = rewritePlaylist(text, targetUrl, !isMaster && await segmentsDirectOk(text, targetUrl));
                 res.writeHead(proxyRes.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
