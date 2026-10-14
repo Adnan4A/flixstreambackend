@@ -265,6 +265,7 @@ async function resolveCinejoyPreferClean(cj, mediaType, ctx, preferred, exclude)
     for (const s of LAST_RESORT_SOURCES) push(s);
 
     let lastErr = null;
+    let sawWarming = false;
     let lastProviders = [];
     const triedUrls = new Set();
 
@@ -309,6 +310,7 @@ async function resolveCinejoyPreferClean(cj, mediaType, ctx, preferred, exclude)
                 console.log('cinejoy accept', src, '->', info.provider, 'm3u8 ok');
                 return Object.assign(info, { _playable: { kind: 'hls', maxRes: 0 } });
             }
+            if (probe.reason === 'no_playable_rendition') sawWarming = true;
             console.error('cinejoy skip', src, 'playlist not playable', probe.reason || probe.http);
         } catch (e) {
             console.error('cinejoy skip', src, 'playlist probe failed', e.message);
@@ -345,6 +347,7 @@ async function resolveCinejoyPreferClean(cj, mediaType, ctx, preferred, exclude)
         }
     }
 
+    if (sawWarming) throw new Error('playlist warming: the source is still preparing this title');
     throw lastErr || new Error('No playable m3u8 from any cinejoy server');
 }
 const PORT = process.env.PORT || 3010;
@@ -583,17 +586,17 @@ function firstPlaylistUris(playlistText, playlistUrl, limit) {
     return out;
 }
 
-function headOk(url) {
+function headOk(url, maxSec = 8) {
     return new Promise((resolve) => {
         const child = spawn('/usr/bin/curl', [
             '-sS', '-I', '-o', '/dev/null', '-w', '%{http_code}',
-            '--max-time', '8',
+            '--max-time', String(maxSec),
             '-H', 'Origin: https://cinejoy.pk',
             '-H', 'Referer: https://cinejoy.pk/',
             url,
         ], { stdio: ['ignore', 'pipe', 'ignore'] });
         let out = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} resolve(false); }, 9000);
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} resolve(false); }, (maxSec + 1) * 1000);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.on('error', () => { clearTimeout(timer); resolve(false); });
         child.on('close', () => {
@@ -656,18 +659,22 @@ async function renditionPlayable(mediaPlaylistUrl) {
     const { impersonatedRequest } = require('./browserfetch.js');
     let ok = false;
     try {
-        const up = await impersonatedRequest(mediaPlaylistUrl, {
-            headers: CINEJOY_CDN_HEADERS,
-            timeoutMs: 8000,
-        });
+        let up = null;
+        try {
+            up = await impersonatedRequest(mediaPlaylistUrl, { headers: CINEJOY_CDN_HEADERS, timeoutMs: 8000 });
+        } catch (e) { up = null; }
+        // Cold titles can take 20s+ to answer the first time, then are instant.
+        // A timeout is not a verdict, so wait once more before giving up.
+        if (!up || !up.status) {
+            up = await impersonatedRequest(mediaPlaylistUrl, { headers: CINEJOY_CDN_HEADERS, timeoutMs: 32000 });
+        }
         const text = up && up.body ? up.body.toString('latin1') : '';
         if (up && up.status >= 200 && up.status < 300 && text.startsWith('#EXTM3U')) {
             // The first segment is often the one the transcoder never wrote.
             // Keep the rendition if any of the first few segments answers 2xx.
-            const segs = firstPlaylistUris(text, mediaPlaylistUrl, 6);
-            for (const seg of segs) {
-                if (await headOk(seg)) { ok = true; break; }
-            }
+            const segs = firstPlaylistUris(text, mediaPlaylistUrl, 4);
+            const checks = await Promise.all(segs.map((seg) => headOk(seg, 14)));
+            ok = checks.some(Boolean);
         }
     } catch (e) {
         ok = false;
@@ -864,6 +871,40 @@ function healthPayload() {
     };
 }
 
+const warmingUrls = new Map();
+/**
+ * Some titles answer with a master playlist but the CDN has not built the renditions yet
+ * (first rendition fetch takes 20s+, first segments longer). Poke them in the background so a
+ * retry a few seconds later finds a warm cache, the same thing cinejoy.pk's own player does by waiting.
+ */
+function warmUpMaster(masterText, masterUrl) {
+    const last = warmingUrls.get(masterUrl);
+    if (last && Date.now() - last < 120000) return;
+    warmingUrls.set(masterUrl, Date.now());
+    if (warmingUrls.size > 200) warmingUrls.delete(warmingUrls.keys().next().value);
+    const { impersonatedRequest } = require('./browserfetch.js');
+    const uris = [];
+    for (const line of String(masterText).split(/\r?\n/)) {
+        const t = line.trim();
+        if (t && !t.startsWith('#')) {
+            try { uris.push(new URL(t, masterUrl).href); } catch (e) {}
+        }
+    }
+    // Lowest rendition first: that is what a player starts on.
+    uris.slice(0, 2).forEach((u) => {
+        (async () => {
+            try {
+                const up = await impersonatedRequest(u, { headers: CINEJOY_CDN_HEADERS, timeoutMs: 90000 });
+                const text = up && up.body ? up.body.toString('latin1') : '';
+                if (up && up.status >= 200 && up.status < 300 && text.startsWith('#EXTM3U')) {
+                    await Promise.all(firstPlaylistUris(text, u, 3).map((seg) => headOk(seg, 60)));
+                    renditionCache.delete(u);
+                }
+            } catch (e) { /* best effort */ }
+        })();
+    });
+}
+
 /** Fetch master playlist and require a real #EXTM3U body (not 451/403/empty). */
 async function probePlaylistPlayable(streamUrl) {
     const { impersonatedRequest } = require('./browserfetch.js');
@@ -893,7 +934,10 @@ async function probePlaylistPlayable(streamUrl) {
     const text = up.body.toString('latin1');
     if (/#EXT-X-STREAM-INF:/i.test(text)) {
         const filtered = await keepPlayableRenditions(text, streamUrl);
-        if (!filtered.ok) return { ok: false, http: status, reason: 'no_playable_rendition' };
+        if (!filtered.ok) {
+            warmUpMaster(text, streamUrl);
+            return { ok: false, http: status, reason: 'no_playable_rendition' };
+        }
     }
     return { ok: true, http: status, reason: null };
 }
@@ -1320,6 +1364,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(status, { 'Content-Type': 'application/json' });
             const reason = String(e.message || '');
             const code = /No source found/i.test(reason) ? 'no_source'
+            : /playlist warming/i.test(reason) ? 'warming'
                 : /No playable|not playable|playlist probe/i.test(reason) ? 'no_playable_playlist'
                 : status === 451 ? 'blocked' : 'upstream';
             res.end(JSON.stringify({ error: 'Unavailable', status: 'fail', code }));

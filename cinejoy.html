@@ -1304,6 +1304,7 @@ function playlistProblem(status, data) {
   const code = data && data.code;
   if (status === 451 || code === 'blocked') return 'this title is blocked by the source right now.';
   if (status === 429) return 'too many requests, wait a minute and try again.';
+  if (code === 'warming') return 'the source is still preparing this title, hang on...';
   if (code === 'no_source') return 'no source found for this title or episode.';
   if (code === 'no_playable_playlist') return 'no source has a working playlist for this title right now (the provider is busy or still preparing it). Try again in a minute or pick another episode.';
   if (status === 404 || status === 500) return 'no playable playlist found right now.';
@@ -1338,6 +1339,7 @@ async function fetchCinejoy(serverName) {
   if (!resp.ok || data.error) {
     const e = new Error('Playlist error: ' + playlistProblem(resp.status, data));
     e.noRetry = resp.status === 400 || resp.status === 451;
+    e.warming = !!(data && data.code === 'warming');
     throw e;
   }
   const stream = data.stream && data.stream[0];
@@ -1643,6 +1645,7 @@ async function switchServer(name) {
 
 let loadToken = 0;
 const RESOLVE_TRIES = 2;
+const WARMING_TRIES = 5;
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 async function loadStream(tryNo) {
@@ -1670,10 +1673,13 @@ async function loadStream(tryNo) {
   } catch (e) {
     clearTimeout(slowTimer);
     if (token !== loadToken) return;
-    if (!e.noRetry && tryNo < RESOLVE_TRIES - 1) {
-      showWarn((e.message || 'Playlist error').replace(/^Playlist error:\s*/, 'Playlist problem: ') +
-        ' Retrying (' + (tryNo + 2) + '/' + RESOLVE_TRIES + ')...', 9000);
-      await sleep(1200 * (tryNo + 1));
+    const maxTries = e.warming ? WARMING_TRIES : RESOLVE_TRIES;
+    if (!e.noRetry && tryNo < maxTries - 1) {
+      showWarn(e.warming
+        ? 'The source is still preparing this title, waiting for it (' + (tryNo + 2) + '/' + maxTries + ')...'
+        : (e.message || 'Playlist error').replace(/^Playlist error:\s*/, 'Playlist problem: ') +
+          ' Retrying (' + (tryNo + 2) + '/' + maxTries + ')...', e.warming ? 0 : 9000);
+      await sleep(e.warming ? 6000 : 1200 * (tryNo + 1));
       if (token !== loadToken) return;
       return loadStream(tryNo + 1);
     }
