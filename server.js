@@ -202,10 +202,11 @@ function preferredSourceName(raw) {
     return SOURCE_BY_SERVER[t.toLowerCase()] || t;
 }
 
-// Solara currently 500s ("no proxy available: load balancer unreachable").
-// Try other live providers first so health/auto don't stall on the dead backproxy.
-const CLEAN_SOURCES = ['Athens', 'Nebula', 'Castle', 'Joy', 'Sakura', 'Canaias', 'Solara'];
-const LAST_RESORT_SOURCES = ['Lisbon'];
+// Lisbon (Vhagar) is the provider that still returns a real HLS host.
+// Nebula's bright67 host is a redirect-loop honeypot. Athens and Solara
+// often have no mirror and fall through to that honeypot, so try Lisbon first.
+const CLEAN_SOURCES = ['Lisbon', 'Athens', 'Nebula', 'Castle', 'Joy', 'Sakura', 'Canaias', 'Solara'];
+const LAST_RESORT_SOURCES = [];
 const ALL_SOURCES = [...CLEAN_SOURCES, ...LAST_RESORT_SOURCES];
 
 function isDirtyCdnHost(host) {
@@ -553,9 +554,120 @@ function cinejoyFailStatus(err) {
     return 500;
 }
 
-const HEALTH_TMDB = 550;
+// 550 (Fight Club) is currently pinned to a dead transcoder node and 502s.
+// Probe a few titles so one bad asset does not mark the whole API down.
+const HEALTH_TMDBS = [155, 27205, 603, 680, 550];
 const HEALTH_TTL_OK = 90 * 1000;
 const HEALTH_TTL_FAIL = 45 * 1000;
+const CINEJOY_CDN_HEADERS = {
+    Referer: 'https://cinejoy.pk/',
+    Origin: 'https://cinejoy.pk',
+    Accept: '*/*',
+};
+const renditionCache = new Map();
+const RENDITION_TTL_MS = 3 * 60 * 1000;
+
+function looksLikeMediaSegment(buf) {
+    if (!buf || buf.length < 8) return false;
+    const box = buf.subarray(4, 8).toString('latin1');
+    if (box === 'ftyp' || box === 'moof' || box === 'styp' || box === 'sidx') return true;
+    if (buf[0] === 0x47) return true;
+    return false;
+}
+
+function firstPlaylistUri(playlistText, playlistUrl) {
+    const base = playlistUrl.slice(0, playlistUrl.lastIndexOf('/') + 1);
+    for (const line of String(playlistText || '').split(/\r?\n/)) {
+        const s = line.trim();
+        if (!s || s.startsWith('#')) continue;
+        try {
+            return /^https?:\/\//i.test(s) ? s : new URL(s, base).href;
+        } catch {
+            return '';
+        }
+    }
+    return '';
+}
+
+/** A rendition is playable only when its first segment is real media, not "origin unavailable". */
+async function renditionPlayable(mediaPlaylistUrl) {
+    const cached = renditionCache.get(mediaPlaylistUrl);
+    if (cached && Date.now() - cached.at < RENDITION_TTL_MS) return cached.ok;
+    const { impersonatedRequest } = require('./browserfetch.js');
+    let ok = false;
+    try {
+        const up = await impersonatedRequest(mediaPlaylistUrl, {
+            headers: CINEJOY_CDN_HEADERS,
+            timeoutMs: 8000,
+        });
+        const text = up && up.body ? up.body.toString('latin1') : '';
+        if (up && up.status >= 200 && up.status < 300 && text.startsWith('#EXTM3U')) {
+            const seg = firstPlaylistUri(text, mediaPlaylistUrl);
+            if (seg) {
+                const segRes = await impersonatedRequest(seg, {
+                    headers: Object.assign({ Range: 'bytes=0-2047' }, CINEJOY_CDN_HEADERS),
+                    timeoutMs: 8000,
+                });
+                const code = segRes && segRes.status;
+                ok = (code === 200 || code === 206) && looksLikeMediaSegment(segRes.body);
+            }
+        }
+    } catch (e) {
+        ok = false;
+    }
+    renditionCache.set(mediaPlaylistUrl, { ok, at: Date.now() });
+    return ok;
+}
+
+/**
+ * Master playlists currently advertise renditions whose segments 502
+ * ("origin unavailable"). Drop those so the player does not start on a dead level.
+ * Returns { text, ok, dropped }.
+ */
+async function keepPlayableRenditions(text, masterUrl) {
+    if (!/#EXT-X-STREAM-INF:/i.test(text)) {
+        return { text, ok: String(text || '').startsWith('#EXTM3U'), dropped: 0 };
+    }
+    const abs = (u) => {
+        try { return /^https?:\/\//i.test(u) ? u : new URL(u, masterUrl).href; }
+        catch { return u; }
+    };
+    const lines = String(text).split(/\r?\n/);
+    const jobs = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const media = /^#EXT-X-MEDIA:/i.test(line) ? line.match(/URI="([^"]+)"/i) : null;
+        if (media) jobs.push({ kind: 'media', line: i, url: abs(media[1]) });
+        if (/^#EXT-X-STREAM-INF:/i.test(line)) {
+            const next = lines[i + 1] ? lines[i + 1].trim() : '';
+            if (next && !next.startsWith('#')) jobs.push({ kind: 'var', inf: i, urlLine: i + 1, url: abs(next) });
+        }
+    }
+    const results = await Promise.all(jobs.map(async (job) => ({ job, ok: await renditionPlayable(job.url) })));
+    const dropLine = new Set();
+    let videos = 0;
+    let videosOk = 0;
+    for (const { job, ok } of results) {
+        if (job.kind === 'var') {
+            videos += 1;
+            if (ok) videosOk += 1;
+            else {
+                dropLine.add(job.inf);
+                dropLine.add(job.urlLine);
+            }
+        } else if (!ok) {
+            dropLine.add(job.line);
+        }
+    }
+    if (!videosOk) return { text: '', ok: false, dropped: videos };
+    const kept = lines.filter((_, i) => !dropLine.has(i));
+    const hasMedia = kept.some((l) => /^#EXT-X-MEDIA:/i.test(l));
+    const outLines = hasMedia ? kept : kept.map((l) => l.replace(/,AUDIO="[^"]*"/ig, ''));
+    if (videos - videosOk > 0) {
+        console.error('cinejoy dropped dead renditions', videos - videosOk, 'of', videos, masterUrl);
+    }
+    return { text: outLines.join('\n'), ok: true, dropped: videos - videosOk };
+}
 // status is only "ok" when resolve + live playlist fetch both succeed (#EXTM3U, not 451).
 let healthCache = {
     status: null,
@@ -602,6 +714,7 @@ function healthPayload() {
         host: healthCache.host || null,
         http: healthCache.http,
         reason: healthCache.reason || null,
+        tmdb: healthCache.tmdb || null,
         checkedAt: healthCache.checkedAt || null,
     };
 }
@@ -623,10 +736,19 @@ async function probePlaylistPlayable(streamUrl) {
         return { ok: false, http: status, reason: 'cdn_blocked_' + status };
     }
     if (status < 200 || status >= 300) {
-        return { ok: false, http: status, reason: 'playlist_http_' + status };
+        const hint = up && up.body ? up.body.subarray(0, 60).toString('latin1').trim() : '';
+        const reason = /transcoding on node|origin unavailable/i.test(hint)
+            ? hint.slice(0, 60)
+            : ('playlist_http_' + status);
+        return { ok: false, http: status, reason };
     }
     if (!head.startsWith('#EXTM3U')) {
         return { ok: false, http: status, reason: 'not_m3u8' };
+    }
+    const text = up.body.toString('latin1');
+    if (/#EXT-X-STREAM-INF:/i.test(text)) {
+        const filtered = await keepPlayableRenditions(text, streamUrl);
+        if (!filtered.ok) return { ok: false, http: status, reason: 'no_playable_rendition' };
     }
     return { ok: true, http: status, reason: null };
 }
@@ -639,39 +761,46 @@ async function checkStreamHealth() {
     healthInFlight = (async () => {
         try {
             const cj = require('./cine_api/cinejoy.js');
-            const info = await Promise.race([
-                resolveCinejoyPreferClean(cj, 'movie', { tmdbId: HEALTH_TMDB }, ''),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('resolve timeout')), 45000)),
-            ]);
-            if (!looksLikeStreamUrl(info && info.url)) {
-                healthCache = {
-                    status: 'fail', checkedAt: Date.now(), provider: info && info.provider || null,
-                    host: null, http: null, playlistOk: false, reason: 'no_stream_url',
-                };
-                void notifyTelegram('API resolving failed.\nHealth probe: no HLS URL');
-                return 'fail';
+            const deadline = Date.now() + 45000;
+            let lastReason = 'No playable m3u8 from any cinejoy server';
+            for (const tmdbId of HEALTH_TMDBS) {
+                if (Date.now() > deadline) break;
+                try {
+                    const info = await resolveCinejoyPreferClean(cj, 'movie', { tmdbId }, '');
+                    if (!looksLikeStreamUrl(info && info.url)) {
+                        lastReason = 'no_stream_url';
+                        continue;
+                    }
+                    const probe = await probePlaylistPlayable(info.url);
+                    if (!probe.ok) {
+                        lastReason = (probe.reason || 'playlist_not_playable') + ' tmdb=' + tmdbId;
+                        console.error('health skip tmdb', tmdbId, probe.reason || probe.http);
+                        continue;
+                    }
+                    let host = null;
+                    try { host = new URL(info.url).hostname; } catch {}
+                    healthCache = {
+                        status: 'ok',
+                        checkedAt: Date.now(),
+                        provider: info.provider || null,
+                        host,
+                        http: probe.http,
+                        playlistOk: true,
+                        reason: null,
+                        tmdb: tmdbId,
+                    };
+                    return 'ok';
+                } catch (e) {
+                    lastReason = String(e.message || 'unknown').slice(0, 100);
+                    console.error('health skip tmdb', tmdbId, lastReason);
+                }
             }
-            let host = null;
-            try { host = new URL(info.url).hostname; } catch {}
-            // URL alone is NOT enough — Lisbon used to resolve while CDN returned 451.
-            const probe = await probePlaylistPlayable(info.url);
             healthCache = {
-                status: probe.ok ? 'ok' : 'fail',
-                checkedAt: Date.now(),
-                provider: info.provider || null,
-                host,
-                http: probe.http,
-                playlistOk: !!probe.ok,
-                reason: probe.reason,
+                status: 'fail', checkedAt: Date.now(), provider: null, host: null,
+                http: null, playlistOk: false, reason: String(lastReason).slice(0, 120),
             };
-            if (!probe.ok) {
-                void notifyTelegram(
-                    'API resolving failed.\nHealth probe: playlist not playable\n' +
-                    'provider=' + (info.provider || '?') + ' host=' + (host || '?') +
-                    ' http=' + probe.http + ' reason=' + probe.reason
-                );
-            }
-            return healthCache.status;
+            void notifyTelegram('API resolving failed.\nHealth probe: ' + String(lastReason).slice(0, 200));
+            return 'fail';
         } catch (e) {
             console.error('health:', e.message);
             healthCache = {
@@ -1149,7 +1278,18 @@ const server = http.createServer(async (req, res) => {
             if (!up.body.length) { res.writeHead(502, corsHdrs); res.end(); return; }
             const head = up.body.subarray(0, 16).toString('latin1');
             if (head.startsWith('#EXTM3U')) {
-                const rewritten = rewritePlaylist(up.body.toString('latin1'), targetUrl, direct);
+                let playlistText = up.body.toString('latin1');
+                if (/#EXT-X-STREAM-INF:/i.test(playlistText)) {
+                    const filtered = await keepPlayableRenditions(playlistText, target);
+                    if (!filtered.ok) {
+                        console.error('cjproxy master has no playable rendition', target);
+                        res.writeHead(502, corsHdrs);
+                        res.end();
+                        return;
+                    }
+                    playlistText = filtered.text;
+                }
+                const rewritten = rewritePlaylist(playlistText, targetUrl, direct);
                 res.writeHead(up.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
