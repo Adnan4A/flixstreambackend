@@ -1288,19 +1288,25 @@ const server = http.createServer(async (req, res) => {
         if (ply) {
             const { impersonatedRequest } = require('./browserfetch.js');
             let up;
-            try {
-                up = await impersonatedRequest(target, { headers: { 'Referer': 'https://cinejoy.pk/' }, timeoutMs: 20000 });
-            } catch (e) {
-                console.error('cjproxy playlist fetch:', e.message);
-                hide(res, 502);
-                return;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    up = await impersonatedRequest(target, { headers: { 'Referer': 'https://cinejoy.pk/' }, timeoutMs: 20000 });
+                } catch (e) {
+                    console.error('cjproxy playlist fetch:', e.message);
+                    up = null;
+                }
+                const body = up && up.body ? up.body.toString('latin1') : '';
+                if (up && up.status >= 200 && up.status < 300 && body.startsWith('#EXTM3U')) break;
+                up = null;
             }
+            if (!up) { res.writeHead(502, corsHdrs); res.end(); return; }
             if (up.status === 451 || up.status === 403) markHostBlocked(targetUrl.hostname);
             if (!up.body.length) { res.writeHead(502, corsHdrs); res.end(); return; }
             const head = up.body.subarray(0, 16).toString('latin1');
             if (head.startsWith('#EXTM3U')) {
                 let playlistText = up.body.toString('latin1');
-                if (/#EXT-X-STREAM-INF:/i.test(playlistText)) {
+                const isMaster = /#EXT-X-STREAM-INF:/i.test(playlistText);
+                if (isMaster) {
                     const filtered = await keepPlayableRenditions(playlistText, target);
                     if (!filtered.ok) {
                         console.error('cjproxy master has no playable rendition', target);
@@ -1310,10 +1316,10 @@ const server = http.createServer(async (req, res) => {
                     }
                     playlistText = filtered.text;
                 }
-                // Browser fetches variants and segments from the CDN. Probing every
-                // segment from this server both stalls playback and hides files the
-                // viewer's edge can still play.
-                const rewritten = rewritePlaylist(playlistText, targetUrl, true);
+                // Masters stay on /api/cjproxy (the CDN playlist itself often 502s
+                // in the browser). Segment URLs go direct to the CDN, which allows
+                // every origin, matching cinejoy.pk.
+                const rewritten = rewritePlaylist(playlistText, targetUrl, !isMaster);
                 res.writeHead(up.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
@@ -1366,7 +1372,8 @@ const server = http.createServer(async (req, res) => {
                     if (done) break;
                     text += Buffer.from(value).toString('latin1');
                 }
-                const rewritten = rewritePlaylist(text, targetUrl, true);
+                const isMaster = /#EXT-X-STREAM-INF:/i.test(text);
+                const rewritten = rewritePlaylist(text, targetUrl, !isMaster);
                 res.writeHead(proxyRes.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
