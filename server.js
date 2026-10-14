@@ -704,6 +704,85 @@ let healthInFlight = null;
 // Per-title result cache for /api/cinejoy (resolve + sniff + subs are expensive).
 const cinejoyCache = new Map();
 const CINEJOY_CACHE_TTL = 3 * 60 * 60 * 1000;
+const SUBTITLE_LIST_URL = 'https://subs.wing.st/subtitles';
+
+function subtitleRank(sub) {
+    const display = String((sub && sub.display) || '').toLowerCase();
+    let score = 0;
+    if (sub && sub.type === 'vtt') score += 5;
+    if (sub && sub.type === 'srt') score += 2;
+    if (/\b(forced|signs|songs?)\b/.test(display)) score -= 80;
+    if (/\b(sdh|hearing)\b/.test(display) || /englishhi|\.hi\b/.test(display)) score -= 15;
+    return score;
+}
+
+function pickSubtitles(list) {
+    const groups = new Map();
+    for (const sub of Array.isArray(list) ? list : []) {
+        if (!sub || typeof sub.url !== 'string' || !/^https:\/\//i.test(sub.url)) continue;
+        const lang = String(sub.language || 'und').toLowerCase();
+        if (!groups.has(lang)) groups.set(lang, []);
+        groups.get(lang).push(sub);
+    }
+    const order = [...groups.keys()].sort((a, b) => (a === 'en' ? -1 : b === 'en' ? 1 : a.localeCompare(b)));
+    const out = [];
+    for (const lang of order) {
+        const ranked = groups.get(lang).slice().sort((a, b) => subtitleRank(b) - subtitleRank(a));
+        const cap = lang === 'en' ? 8 : 2;
+        for (const sub of ranked.slice(0, cap)) {
+            out.push({
+                language: sub.language || lang,
+                url: sub.url.replace(/subtitles\.shegu\.st/gi, 'subs.wing.st'),
+                type: sub.type || 'srt',
+                display: String(sub.display || sub.language || 'Subtitle').slice(0, 180)
+            });
+        }
+    }
+    return out;
+}
+
+function mergeSubtitles(captions, wingList) {
+    const extra = [];
+    for (const cap of Array.isArray(captions) ? captions : []) {
+        if (!cap) continue;
+        const url = cap.url || cap.file || '';
+        if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) continue;
+        extra.push({
+            language: cap.language || cap.lang || 'und',
+            url,
+            type: cap.type || cap.format || 'vtt',
+            display: cap.display || cap.label || cap.language || 'Subtitle'
+        });
+    }
+    return pickSubtitles(extra.concat(Array.isArray(wingList) ? wingList : []));
+}
+
+async function fetchWingSubtitles(isTv, tmdb, season, episode) {
+    const id = parseInt(tmdb, 10);
+    if (!Number.isInteger(id) || id < 1) return [];
+    const q = new URLSearchParams({ type: isTv ? 'tv' : 'movie', tmdb: String(id) });
+    if (isTv) {
+        q.set('season', String(Number.isInteger(parseInt(season, 10)) && parseInt(season, 10) > 0 ? parseInt(season, 10) : 1));
+        q.set('episode', String(Number.isInteger(parseInt(episode, 10)) && parseInt(episode, 10) > 0 ? parseInt(episode, 10) : 1));
+    }
+    try {
+        const r = await fetch(SUBTITLE_LIST_URL + '?' + q.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
+                'Origin': 'https://cinejoy.pk',
+                'Referer': 'https://cinejoy.pk/'
+            },
+            signal: AbortSignal.timeout(8000)
+        });
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data) ? data : ((data && data.subtitles) || []);
+    } catch (e) {
+        console.error('subtitle list error:', e.message);
+        return [];
+    }
+}
 
 // CDN-side block cooldown: after a 451/403 we stop touching that host for a while.
 const blockedHosts = new Map();
@@ -1134,13 +1213,7 @@ const server = http.createServer(async (req, res) => {
                 imdbId: typeof parsed.imdb === 'string' ? parsed.imdb.slice(0, 32) : undefined,
                 year: parseInt(parsed.year, 10) || undefined
             };
-            const subP = fetch(`https://subtitles.shegu.st/subtitles?type=${isTv ? 'tv' : 'movie'}&tmdb=${tmdb}` +
-                (isTv ? `&season=${Number.isInteger(season) && season > 0 ? season : 1}&episode=${Number.isInteger(episode) && episode > 0 ? episode : 1}` : ''), {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
-                    signal: AbortSignal.timeout(8000)
-                })
-                .then(r => r.json())
-                .catch(() => ({ subtitles: [] }));
+            const subP = fetchWingSubtitles(isTv, tmdb, season, episode);
             // Auto: walk every server until a live m3u8 is confirmed. Never return a dead URL.
             const info = await resolveCinejoyPreferClean(cj, isTv ? 'tv' : 'movie', resolveCtx, preferred || '', exclude);
             const subRes = await subP;
@@ -1171,7 +1244,7 @@ const server = http.createServer(async (req, res) => {
                     source: 'cinejoy'
                 }],
                 alternatives: [],
-                subtitles: [...(info.captions || []), ...(subRes.subtitles || [])],
+                subtitles: mergeSubtitles(info.captions, subRes),
                 meta: { title: typeof parsed.title === 'string' ? parsed.title.slice(0, 200) : String(tmdb) },
                 provider: DRAGON_NAMES[activeInternal] || activeInternal,
                 providerInternal: activeInternal,
@@ -1201,12 +1274,9 @@ const server = http.createServer(async (req, res) => {
         if (!tmdb) { res.writeHead(400); res.end('Missing tmdb'); return; }
         if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
         try {
-            const subRes = await fetch(`https://subtitles.arigold.ru/subtitles?type=movie&tmdb=${tmdb}`, {
-                headers: { 'Origin': 'https://subtitles.arigold.ru', 'Referer': 'https://subtitles.arigold.ru/' }
-            });
-            const data = await subRes.json();
+            const subtitles = await fetchWingSubtitles(false, tmdb, 1, 1);
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(data));
+            res.end(JSON.stringify({ subtitles }));
         } catch (e) {
             console.error('subtitles error:', e.message);
             hide(res, 502);
@@ -1242,28 +1312,47 @@ const server = http.createServer(async (req, res) => {
 
     // API: fetch subtitle content by URL, return as VTT with correct MIME type
     if (pathname === '/api/subtitle') {
-        const targetUrl = publicHttpUrl(url.searchParams.get('url'));
+        const rawTarget = String(url.searchParams.get('url') || '').replace(/subtitles\.shegu\.st/gi, 'subs.wing.st');
+        const targetUrl = publicHttpUrl(rawTarget);
         if (!targetUrl) { hide(res, 400); return; }
         const target = targetUrl.href;
         try {
             const subRes = await fetch(target, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                    'Referer': 'https://www.opensubtitles.org/',
-                    'Accept': '*/*'
-                }
+                    'Referer': 'https://cinejoy.pk/',
+                    'Origin': 'https://cinejoy.pk',
+                    'Accept': 'text/plain,text/vtt,*/*'
+                },
+                signal: AbortSignal.timeout(12000),
+                redirect: 'follow'
             });
+            if (!subRes.ok) {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end('');
+                return;
+            }
             let content = await subRes.text();
+            if (content.length > 2000000) content = content.slice(0, 2000000);
+            content = content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            if (/^\s*</.test(content) || /cloudflare|error code:/i.test(content.slice(0, 240))) {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end('');
+                return;
+            }
             // Convert SRT to VTT if needed
-            content = content.replace(/\r\n/g, '\n');
             if (!content.startsWith('WEBVTT')) {
                 content = 'WEBVTT\n\n' + content.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
             }
-            res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8' });
+            res.writeHead(200, {
+                'Content-Type': 'text/vtt; charset=utf-8',
+                'Cache-Control': 'public, max-age=3600'
+            });
             res.end(content);
         } catch (e) {
             console.error('subtitle error:', e.message);
-            hide(res, 502);
+            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('');
         }
         return;
     }
