@@ -567,32 +567,47 @@ const CINEJOY_CDN_HEADERS = {
 const renditionCache = new Map();
 const RENDITION_TTL_MS = 3 * 60 * 1000;
 
-function looksLikeMediaSegment(buf) {
-    if (!buf || buf.length < 8) return false;
-    const box = buf.subarray(4, 8).toString('latin1');
-    if (box === 'ftyp' || box === 'moof' || box === 'styp' || box === 'sidx') return true;
-    if (buf[0] === 0x47) return true;
-    return false;
-}
 
-function firstPlaylistUri(playlistText, playlistUrl) {
-    const base = playlistUrl.slice(0, playlistUrl.lastIndexOf('/') + 1);
+function firstPlaylistUris(playlistText, playlistUrl, limit) {
+    const out = [];
     for (const line of String(playlistText || '').split(/\r?\n/)) {
         const s = line.trim();
         if (!s || s.startsWith('#')) continue;
         try {
-            return /^https?:\/\//i.test(s) ? s : new URL(s, base).href;
+            out.push(/^https?:\/\//i.test(s) ? s : new URL(s, playlistUrl).href);
         } catch {
-            return '';
+            continue;
         }
+        if (out.length >= limit) break;
     }
-    return '';
+    return out;
 }
 
-/** A rendition is playable only when its first segment is real media, not "origin unavailable". */
+function headOk(url) {
+    return new Promise((resolve) => {
+        const child = spawn('/usr/bin/curl', [
+            '-sS', '-I', '-o', '/dev/null', '-w', '%{http_code}',
+            '--max-time', '8',
+            '-H', 'Origin: https://cinejoy.pk',
+            '-H', 'Referer: https://cinejoy.pk/',
+            url,
+        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+        let out = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} resolve(false); }, 9000);
+        child.stdout.on('data', (d) => { out += d.toString(); });
+        child.on('error', () => { clearTimeout(timer); resolve(false); });
+        child.on('close', () => {
+            clearTimeout(timer);
+            const code = parseInt(out.trim(), 10) || 0;
+            resolve(code >= 200 && code < 300);
+        });
+    });
+}
+
+/** A rendition is playable when its playlist and first segment answer 2xx. */
 async function renditionPlayable(mediaPlaylistUrl) {
     const cached = renditionCache.get(mediaPlaylistUrl);
-    if (cached && Date.now() - cached.at < RENDITION_TTL_MS) return cached.ok;
+    if (cached && Date.now() - cached.at < cached.ttl) return cached.ok;
     const { impersonatedRequest } = require('./browserfetch.js');
     let ok = false;
     try {
@@ -602,20 +617,17 @@ async function renditionPlayable(mediaPlaylistUrl) {
         });
         const text = up && up.body ? up.body.toString('latin1') : '';
         if (up && up.status >= 200 && up.status < 300 && text.startsWith('#EXTM3U')) {
-            const seg = firstPlaylistUri(text, mediaPlaylistUrl);
-            if (seg) {
-                const segRes = await impersonatedRequest(seg, {
-                    headers: Object.assign({ Range: 'bytes=0-2047' }, CINEJOY_CDN_HEADERS),
-                    timeoutMs: 8000,
-                });
-                const code = segRes && segRes.status;
-                ok = (code === 200 || code === 206) && looksLikeMediaSegment(segRes.body);
+            // The first segment is often the one the transcoder never wrote.
+            // Keep the rendition if any of the first few segments answers 2xx.
+            const segs = firstPlaylistUris(text, mediaPlaylistUrl, 6);
+            for (const seg of segs) {
+                if (await headOk(seg)) { ok = true; break; }
             }
         }
     } catch (e) {
         ok = false;
     }
-    renditionCache.set(mediaPlaylistUrl, { ok, at: Date.now() });
+    renditionCache.set(mediaPlaylistUrl, { ok, at: Date.now(), ttl: ok ? RENDITION_TTL_MS : 15000 });
     return ok;
 }
 
@@ -636,6 +648,12 @@ async function keepPlayableRenditions(text, masterUrl) {
     const jobs = [];
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        // Video renditions already carry mp4a. The separate audio playlist 502s
+        // and hls.js will not start the video while that track is required.
+        if (/^#EXT-X-MEDIA:/i.test(line) && /TYPE=AUDIO/i.test(line)) {
+            jobs.push({ kind: 'media', line: i, url: '' });
+            continue;
+        }
         const media = /^#EXT-X-MEDIA:/i.test(line) ? line.match(/URI="([^"]+)"/i) : null;
         if (media) jobs.push({ kind: 'media', line: i, url: abs(media[1]) });
         if (/^#EXT-X-STREAM-INF:/i.test(line)) {
@@ -643,7 +661,10 @@ async function keepPlayableRenditions(text, masterUrl) {
             if (next && !next.startsWith('#')) jobs.push({ kind: 'var', inf: i, urlLine: i + 1, url: abs(next) });
         }
     }
-    const results = await Promise.all(jobs.map(async (job) => ({ job, ok: await renditionPlayable(job.url) })));
+    const results = await Promise.all(jobs.map(async (job) => ({
+        job,
+        ok: job.url ? await renditionPlayable(job.url) : false,
+    })));
     const dropLine = new Set();
     let videos = 0;
     let videosOk = 0;
@@ -1136,8 +1157,9 @@ const server = http.createServer(async (req, res) => {
                     if (detail && detail.maxRes) sniff.maxRes = detail.maxRes;
                 } catch (_) {}
             }
-            // Keep playlist URLs on /api/cjproxy (no direct=1). CDN hosts 403 browser
-            // Origin / lack CORS, so HLS.js must load variants+segments via our proxy.
+            // Master stays on /api/cjproxy so dead renditions can be removed.
+            // Variant and segment URLs inside it are rewritten to the CDN (direct),
+            // which sends Access-Control-Allow-Origin: * — same path cinejoy.pk uses.
             const playlist = '/api/cjproxy?url=' + encodeURIComponent(info.url);
             const activeInternal = info.provider;
             const data = {
@@ -1252,7 +1274,6 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/cjproxy') {
         const targetUrl = publicHttpUrl(url.searchParams.get('url'));
         if (!targetUrl) { hide(res, 400); return; }
-        const direct = url.searchParams.get('direct') === '1';
         const corsHdrs = { 'Access-Control-Allow-Origin': '*', 'Vary': 'Origin', 'Access-Control-Allow-Headers': 'Range' };
         if (req.method === 'OPTIONS') {
             res.writeHead(204, corsHdrs);
@@ -1289,7 +1310,10 @@ const server = http.createServer(async (req, res) => {
                     }
                     playlistText = filtered.text;
                 }
-                const rewritten = rewritePlaylist(playlistText, targetUrl, direct);
+                // Browser fetches variants and segments from the CDN. Probing every
+                // segment from this server both stalls playback and hides files the
+                // viewer's edge can still play.
+                const rewritten = rewritePlaylist(playlistText, targetUrl, true);
                 res.writeHead(up.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
@@ -1342,7 +1366,7 @@ const server = http.createServer(async (req, res) => {
                     if (done) break;
                     text += Buffer.from(value).toString('latin1');
                 }
-                const rewritten = rewritePlaylist(text, targetUrl, direct);
+                const rewritten = rewritePlaylist(text, targetUrl, true);
                 res.writeHead(proxyRes.status, Object.assign({
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'no-store'
