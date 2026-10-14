@@ -1274,7 +1274,19 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/cjproxy') {
         const targetUrl = publicHttpUrl(url.searchParams.get('url'));
         if (!targetUrl) { hide(res, 400); return; }
-        const corsHdrs = { 'Access-Control-Allow-Origin': '*', 'Vary': 'Origin', 'Access-Control-Allow-Headers': 'Range' };
+        const corsHdrs = {
+            'Access-Control-Allow-Origin': '*',
+            'Vary': 'Origin',
+            'Access-Control-Allow-Headers': 'Content-Type, Range, X-Flix-Client',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        };
+        // 502/504 from this route is replaced by Cloudflare and the CORS headers
+        // are stripped, so hls.js reports a fake network error while loading a playlist.
+        const playlistFail = (status) => {
+            const code = status === 502 || status === 503 || status === 504 ? 404 : status;
+            res.writeHead(code, corsHdrs);
+            res.end();
+        };
         if (req.method === 'OPTIONS') {
             res.writeHead(204, corsHdrs);
             res.end();
@@ -1299,9 +1311,9 @@ const server = http.createServer(async (req, res) => {
                 if (up && up.status >= 200 && up.status < 300 && body.startsWith('#EXTM3U')) break;
                 up = null;
             }
-            if (!up) { res.writeHead(502, corsHdrs); res.end(); return; }
+            if (!up) { playlistFail(404); return; }
             if (up.status === 451 || up.status === 403) markHostBlocked(targetUrl.hostname);
-            if (!up.body.length) { res.writeHead(502, corsHdrs); res.end(); return; }
+            if (!up.body.length) { playlistFail(404); return; }
             const head = up.body.subarray(0, 16).toString('latin1');
             if (head.startsWith('#EXTM3U')) {
                 let playlistText = up.body.toString('latin1');
@@ -1310,8 +1322,7 @@ const server = http.createServer(async (req, res) => {
                     const filtered = await keepPlayableRenditions(playlistText, target);
                     if (!filtered.ok) {
                         console.error('cjproxy master has no playable rendition', target);
-                        res.writeHead(502, corsHdrs);
-                        res.end();
+                        playlistFail(404);
                         return;
                     }
                     playlistText = filtered.text;
