@@ -740,6 +740,7 @@ video.addEventListener('click', () => {
 
 // ── Play / Pause ──
 function togglePlay() {
+  if (Date.now() - soundTapAt < 500) return;
   if (video.paused) { video.play(); }
   else { video.pause(); }
   showControls();
