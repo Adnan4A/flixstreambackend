@@ -262,7 +262,7 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:168px}
 /* ── Touch devices (phones/tablets): streaming-app layout. Desktop untouched. ── */
 .progress-row{display:flex;align-items:center;gap:12px}
 .progress-row .progress-wrap{flex:1;min-width:0}
-.time-m,.top-bar .back-arrow,.controls-row .pip-btn{display:none}
+.time-m,.top-bar .back-arrow{display:none}
 @media (pointer:coarse){
 .top-bar{display:grid;grid-template-columns:48px 1fr 48px;align-items:center;padding:calc(14px + env(safe-area-inset-top)) 14px 14px;gap:0;background:linear-gradient(180deg,rgba(0,0,0,.7) 0,transparent 100%)}
 .top-bar > div{display:none}
@@ -289,7 +289,6 @@ body.chrome-visible .center-overlay{opacity:1}
 .controls-row .volume-wrap button{display:flex}
 .controls-row button{padding:9px;color:#fff;-webkit-tap-highlight-color:transparent;flex:0 0 auto}
 .controls-row button svg{width:25px;height:25px}
-.controls-row .pip-btn:not([hidden]){display:flex;order:1}
 .controls-row #epBtn{order:2}
 .controls-row #serverBtn{order:3}
 .controls-row #ccBtn{order:4}
@@ -452,9 +451,6 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
     </div>
     <span class="time" id="timeLabel">0:00 / 0:00</span>
     <div class="spacer"></div>
-    <button id="pipBtn" class="pip-btn" onclick="togglePip()" title="Picture in picture" hidden>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><rect x="11.5" y="11" width="8" height="6" rx="1" fill="currentColor"/></svg>
-    </button>
     <button id="epBtn" onclick="toggleEpisodeRail()" title="Episodes" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="14" height="10" rx="2"/><path d="M7 5V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-1"/></svg>
     </button>
@@ -822,19 +818,6 @@ function playWithSound() {
     }
   });
 }
-function togglePip() {
-  try {
-    if (document.pictureInPictureElement) document.exitPictureInPicture();
-    else if (video.requestPictureInPicture) video.requestPictureInPicture();
-    else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode(video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
-  } catch (_) {}
-  showControls();
-}
-(function initPip() {
-  const b = document.getElementById('pipBtn');
-  const ok = (document.pictureInPictureEnabled && video.requestPictureInPicture) || (video.webkitSupportsPresentationMode && video.webkitSupportsPresentationMode('picture-in-picture'));
-  if (b && ok) b.hidden = false;
-})();
 function updateVolumeIcon() {
   const v = video.muted ? 0 : video.volume;
   volumeSlider.value = v;
@@ -1038,6 +1021,7 @@ function buildSubtitleMenu() {
   const off = document.createElement('button');
   off.className = 'subtitle-item' + (currentSubIdx < 0 ? ' active' : '');
   off.innerHTML = '<span class="check"></span><span class="lang"><span class="lang-name">Off</span></span>';
+  off.dataset.off = '1';
   off.onclick = () => selectExternalSubtitle(null, off);
   subtitleItems.appendChild(off);
 
@@ -1122,29 +1106,70 @@ function loadSubtitle(sub) {
   }).finally(function () { clearTimeout(timer); });
 }
 
-function selectExternalSubtitle(sub, btn) {
-  subtitleSub.querySelectorAll('.subtitle-item').forEach(b => b.classList.remove('active', 'failed', 'checking'));
+let subToken = 0;
+let userSubUrl = '';
+
+function subLabel(sub) { return (sub.display || langName(sub)).replace(/#\d+$/, ''); }
+
+function refreshSubtitleActive() {
+  subtitleSub.querySelectorAll('.subtitle-item').forEach(function (b) {
+    const isOff = b.dataset.off === '1';
+    b.classList.toggle('active', isOff ? currentSubIdx < 0 : String(currentSubIdx) === b.dataset.subIdx);
+  });
+}
+
+function removeNativeSubtitles() {
+  video.querySelectorAll('track[data-native-cc]').forEach(function (t) {
+    try { URL.revokeObjectURL(t.src); } catch (e) {}
+    t.remove();
+  });
+}
+
+function clearSubtitleSelection() {
   subtitleCues = [];
   currentSubIdx = -1;
-  document.getElementById('subtitleOverlay').classList.remove('visible');
+  const ov = document.getElementById('subtitleOverlay');
+  ov.classList.remove('visible');
+  ov.textContent = '';
+  removeNativeSubtitles();
+  subtitleValue.textContent = 'Off';
+  ccBtn.classList.remove('active');
+  refreshSubtitleActive();
+}
 
-  if (!sub) { btn.classList.add('active'); subtitleValue.textContent = 'Off'; ccBtn.classList.remove('active'); return; }
+function setActiveSubtitle(sub, idx, vtt, cues) {
+  subtitleCues = cues;
+  currentSubIdx = idx;
+  subtitleValue.textContent = subLabel(sub);
+  ccBtn.classList.add('active');
+  refreshSubtitleActive();
+  enableNativeSubtitles(vtt, sub.language || 'en', subLabel(sub));
+}
 
+function selectExternalSubtitle(sub, btn) {
+  const token = ++subToken;
+  if (!sub) {
+    userSubUrl = '';
+    clearSubtitleSelection();
+    return;
+  }
+  const idx = parseInt(btn.dataset.subIdx, 10);
+  subtitleSub.querySelectorAll('.subtitle-item').forEach(function (b) { b.classList.remove('failed', 'checking'); });
   btn.classList.add('checking');
+  const prevLabel = subtitleValue.textContent;
   subtitleValue.textContent = 'Loading...';
-  loadSubtitle(sub).then(vtt => {
+  loadSubtitle(sub).then(function (vtt) {
+    if (token !== subToken) return;
     const cues = parseVTT(vtt);
     if (!cues.length) throw new Error('Empty subtitles');
-    subtitleCues = cues;
-    currentSubIdx = parseInt(btn.dataset.subIdx);
+    userSubUrl = sub.url;
     btn.classList.remove('checking');
-    btn.classList.add('active');
-    subtitleValue.textContent = (sub.display || langName(sub)).replace(/#\d+$/, '');
-    ccBtn.classList.add('active');
-  }).catch(() => {
+    setActiveSubtitle(sub, idx, vtt, cues);
+  }).catch(function () {
+    if (token !== subToken) return;
     btn.classList.remove('checking');
     btn.classList.add('failed');
-    subtitleValue.textContent = currentSubIdx >= 0 ? subtitleValue.textContent : 'Off';
+    subtitleValue.textContent = prevLabel === 'Loading...' ? (currentSubIdx >= 0 ? subLabel(subtitleList[currentSubIdx]) : 'Off') : prevLabel;
   });
 }
 
@@ -1168,6 +1193,7 @@ function englishSubtitleScore(s) {
 
 function autoSelectEnglishSubtitle() {
   if (!subtitleList.length) return;
+  const token = ++subToken;
   const ranked = subtitleList
     .map(function (s, i) { return { s: s, i: i, score: englishSubtitleScore(s) }; })
     .filter(function (x) { return x.score > 0; })
@@ -1175,31 +1201,21 @@ function autoSelectEnglishSubtitle() {
   if (!ranked.length) return;
 
   const tryAt = function (n) {
-    if (n >= ranked.length) return;
+    if (n >= ranked.length || token !== subToken) return;
     const pick = ranked[n];
     loadSubtitle(pick.s).then(function (vtt) {
+      if (token !== subToken) return;
       const cues = parseVTT(vtt);
       if (!cues.length) throw new Error('Empty subtitles');
-      subtitleCues = cues;
-      currentSubIdx = pick.i;
-      subtitleValue.textContent = (pick.s.display || langName(pick.s)).replace(/#\d+$/, '');
-      ccBtn.classList.add('active');
-      const btn = subtitleItems.querySelector('[data-sub-idx="' + pick.i + '"]');
-      if (btn) {
-        subtitleItems.querySelectorAll('.subtitle-item').forEach(function (b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-      }
-      // Enable native <track> for mobile/iOS/Android native fullscreen CC support
-      enableNativeSubtitles(vtt, pick.s.language || 'en', (pick.s.display || langName(pick.s)).replace(/#\d+$/, ''));
+      setActiveSubtitle(pick.s, pick.i, vtt, cues);
     }).catch(function () { tryAt(n + 1); });
-    };
-    tryAt(0);
-    }
+  };
+  tryAt(0);
+}
 
     // Enable native HTML5 <track> so mobile/iOS/Android native fullscreen shows CC
     function enableNativeSubtitles(vttText, language, label) {
-    var existing = video.querySelector('track[data-native-cc]');
-    if (existing) existing.remove();
+    removeNativeSubtitles();
     var blob = new Blob([vttText], { type: 'text/vtt' });
     var url = URL.createObjectURL(blob);
     var trackEl = document.createElement('track');
@@ -1207,18 +1223,20 @@ function autoSelectEnglishSubtitle() {
     trackEl.label = label;
     trackEl.srclang = language;
     trackEl.src = url;
-    trackEl.default = true;
     trackEl.setAttribute('data-native-cc', 'true');
     video.appendChild(trackEl);
-    trackEl.addEventListener('load', function () {
-    for (var i = 0; i < video.textTracks.length; i++) {
+    trackEl.addEventListener('load', function () { setNativeCaptionMode(nativeFullscreen ? 'showing' : 'hidden'); });
+    }
+
+var nativeFullscreen = false;
+function setNativeCaptionMode(mode) {
+  for (var i = 0; i < video.textTracks.length; i++) {
     var t = video.textTracks[i];
-    if (t.kind === 'captions' && t.language === language) {
-      t.mode = 'showing';
-    }
-    }
-    });
-    }
+    if (t.kind === 'captions') t.mode = mode;
+  }
+}
+video.addEventListener('webkitbeginfullscreen', function () { nativeFullscreen = true; setNativeCaptionMode('showing'); });
+video.addEventListener('webkitendfullscreen', function () { nativeFullscreen = false; setNativeCaptionMode('hidden'); });
 
 // Subtitle rendering via timeupdate
 video.addEventListener('timeupdate', () => {
@@ -1411,6 +1429,14 @@ async function resolveCinejoy(serverName) {
 function applySubtitles(data) {
   if (!data.subtitles) return;
   subtitleList = data.subtitles;
+  const keep = userSubUrl ? subtitleList.findIndex(function (s) { return s.url === userSubUrl; }) : -1;
+  if (keep >= 0 && subtitleCues.length) {
+    currentSubIdx = keep;
+    buildSubtitleMenu();
+    refreshSubtitleActive();
+    return;
+  }
+  userSubUrl = '';
   currentSubIdx = -1;
   subtitleCues = [];
   buildSubtitleMenu();
