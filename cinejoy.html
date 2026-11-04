@@ -1652,7 +1652,37 @@ function playResolved(stream, playlist) {
     return;
   }
   setStatus(STATUS.load);
+  const mseOk = typeof Hls !== 'undefined' && Hls.isSupported();
+  if (!mseOk && video.canPlayType('application/vnd.apple.mpegurl')) {
+    playNativeHls(playlist);
+    return;
+  }
+  if (!window.MediaSource && window.ManagedMediaSource) video.disableRemotePlayback = true;
   wireHls(playlist);
+}
+
+function playNativeHls(playlist) {
+  const token = loadToken;
+  currentPlaylist = playlist;
+  let started = false;
+  const fail = function (why) {
+    if (started || token !== loadToken) return;
+    started = true;
+    recoverOrFail('Playback error: ' + why);
+  };
+  const timer = setTimeout(function () { fail('the stream did not start.'); }, 25000);
+  video.onerror = function () { clearTimeout(timer); fail('this browser could not play the stream.'); };
+  video.addEventListener('loadedmetadata', function () {
+    if (started || token !== loadToken) return;
+    started = true;
+    clearTimeout(timer);
+    loading.classList.add('hidden');
+    errorScreen.classList.remove('show');
+    startPlayback();
+    updateTitleCard();
+  }, { once: true });
+  video.src = playlist;
+  video.load();
 }
 
 function selectServer(name) {
