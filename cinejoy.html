@@ -282,13 +282,13 @@ body.chrome-visible .center-overlay{opacity:1}
 .progress-wrap{height:28px}
 .progress-track{height:4px}
 .progress-thumb{transform:translateY(-50%) scale(1);width:14px;height:14px;margin-left:-7px}
-.controls-row{justify-content:center;gap:clamp(14px,6vw,40px);padding:8px 0 4px}
+.controls-row{justify-content:space-between;gap:0;padding:8px 0 4px;max-width:520px;margin:0 auto}
 .controls-row .playback-cluster>.play-ctrl,.controls-row .playback-cluster>.skip-ctrl,.controls-row .time,.controls-row .spacer{display:none}
 .controls-row .playback-cluster{order:0}
 .controls-row .volume-wrap .volume-slider{display:none}
 .controls-row .volume-wrap button{display:flex}
-.controls-row button{padding:10px;color:#fff;-webkit-tap-highlight-color:transparent}
-.controls-row button svg{width:26px;height:26px}
+.controls-row button{padding:9px;color:#fff;-webkit-tap-highlight-color:transparent;flex:0 0 auto}
+.controls-row button svg{width:25px;height:25px}
 .controls-row .pip-btn:not([hidden]){display:flex;order:1}
 .controls-row #epBtn{order:2}
 .controls-row #serverBtn{order:3}
@@ -313,7 +313,18 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
 .controls-row button{padding:6px}
 .controls-row button svg{width:22px;height:22px}
 .settings-panel,.subtitle-popover{bottom:calc(62px + env(safe-area-inset-bottom));max-height:72vh}
-.title-card{bottom:calc(84px + env(safe-area-inset-bottom))}
+.title-card{bottom:calc(84px + env(safe-area-inset-bottom));max-width:60vw}
+.title-card .overview{display:none}
+.title-card .logo{max-height:52px;margin-bottom:6px}
+.title-card .name{font-size:22px;margin-bottom:6px}
+.title-card .meta{margin-bottom:0}
+.center-overlay{padding-bottom:64px}
+.controls-row{max-width:none;justify-content:center;gap:clamp(18px,5vw,48px)}
+}
+@media (pointer:coarse) and (orientation:portrait) and (max-height:700px){
+.title-card .logo{max-height:56px;margin-bottom:8px}
+.title-card .overview{-webkit-line-clamp:2}
+.center-overlay{padding-bottom:30px}
 }
 
 .hidden{display:none!important}
@@ -350,7 +361,7 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
 
 <!-- Video -->
 <div class="video-container">
-  <video id="video" playsinline autoplay muted webkit-playsinline></video>
+  <video id="video" playsinline autoplay webkit-playsinline></video>
   <div class="subtitle-overlay" id="subtitleOverlay"></div>
 </div>
 
@@ -722,6 +733,7 @@ document.addEventListener('mousemove', showControls);
 document.addEventListener('touchstart', showControls);
 
 video.addEventListener('click', () => {
+  if (Date.now() - soundTapAt < 500) return;
   if (video.paused) { video.play(); showControls(); }
   else { video.pause(); }
 });
@@ -761,11 +773,53 @@ function skip(sec) {
 }
 
 // ── Volume ──
-function setVolume(v) { video.volume = v; video.muted = false; updateVolumeIcon(); }
+let autoMuted = false;
+function savePrefs() {
+  try {
+    localStorage.setItem('cinejoy:volume', String(video.volume));
+    localStorage.setItem('cinejoy:muted', video.muted && !autoMuted ? '1' : '0');
+  } catch (e) {}
+}
+function setVolume(v) {
+  autoMuted = false;
+  video.volume = Math.max(0, Math.min(1, Number(v)));
+  video.muted = video.volume === 0;
+  updateVolumeIcon();
+  savePrefs();
+}
 function toggleMute() {
+  autoMuted = false;
   video.muted = !video.muted;
   if (!video.muted && video.volume === 0) video.volume = 1;
   updateVolumeIcon();
+  savePrefs();
+  if (warnSticky && !video.muted) hideWarn();
+}
+let soundTapAt = 0;
+function enableSoundOnGesture() {
+  if (!autoMuted) return;
+  soundTapAt = Date.now();
+  autoMuted = false;
+  video.muted = false;
+  if (video.volume === 0) video.volume = 1;
+  updateVolumeIcon();
+  if (warnSticky) hideWarn();
+}
+['pointerdown', 'touchend', 'keydown'].forEach(function (ev) {
+  document.addEventListener(ev, enableSoundOnGesture, true);
+});
+function playWithSound() {
+  const p = video.play();
+  if (!p || !p.catch) return;
+  p.catch(function (err) {
+    if (err && err.name === 'NotAllowedError' && !video.muted) {
+      autoMuted = true;
+      video.muted = true;
+      updateVolumeIcon();
+      video.play().catch(function () {});
+      showWarn('Sound is off by the browser. Tap anywhere to turn it on.', 0);
+    }
+  });
 }
 function togglePip() {
   try {
@@ -1210,7 +1264,6 @@ function destroyHls() {
 }
 
 function startPlayback() {
-  video.muted = true;
   const resumeAt = pendingSeek != null ? pendingSeek : consumeResumeTime();
   pendingSeek = null;
   const applySeek = () => {
@@ -1222,7 +1275,7 @@ function startPlayback() {
     video.addEventListener('loadedmetadata', applySeek, { once: true });
   };
   applySeek();
-  video.play().catch(() => {});
+  playWithSound();
   updateVolumeIcon();
 }
 
@@ -2097,8 +2150,16 @@ document.addEventListener('click', function (ev) {
 // ── Init ──
 titleText.textContent = 'Now Playing';
 loadTheme();
-video.muted = true;
-video.volume = 0;
+(function restoreVolume() {
+  let v = 1, m = false;
+  try {
+    const sv = parseFloat(localStorage.getItem('cinejoy:volume'));
+    if (isFinite(sv) && sv >= 0 && sv <= 1) v = sv;
+    m = localStorage.getItem('cinejoy:muted') === '1';
+  } catch (e) {}
+  video.volume = v > 0 ? v : 1;
+  video.muted = m;
+})();
 updateVolumeIcon();
 showControls();
 loadMeta();
