@@ -700,12 +700,8 @@ async function keepPlayableRenditions(text, masterUrl) {
     const jobs = [];
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        // Video renditions already carry mp4a. The separate audio playlist 502s
-        // and hls.js will not start the video while that track is required.
-        if (/^#EXT-X-MEDIA:/i.test(line) && /TYPE=AUDIO/i.test(line)) {
-            jobs.push({ kind: 'media', line: i, url: '' });
-            continue;
-        }
+        // Demuxed audio lives in its own playlist. It must be kept (otherwise the video is
+        // silent) and is only dropped when that audio playlist itself is dead.
         const media = /^#EXT-X-MEDIA:/i.test(line) ? line.match(/URI="([^"]+)"/i) : null;
         if (media) jobs.push({ kind: 'media', line: i, url: abs(media[1]) });
         if (/^#EXT-X-STREAM-INF:/i.test(line)) {

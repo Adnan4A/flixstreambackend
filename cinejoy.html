@@ -733,14 +733,14 @@ document.addEventListener('mousemove', showControls);
 document.addEventListener('touchstart', showControls);
 
 video.addEventListener('click', () => {
-  if (Date.now() - soundTapAt < 500) return;
+  if (!video.paused && Date.now() - soundTapAt < 500) return;
   if (video.paused) { video.play(); showControls(); }
   else { video.pause(); }
 });
 
 // ── Play / Pause ──
 function togglePlay() {
-  if (Date.now() - soundTapAt < 500) return;
+  if (!video.paused && Date.now() - soundTapAt < 500) return;
   if (video.paused) { video.play(); }
   else { video.pause(); }
   showControls();
