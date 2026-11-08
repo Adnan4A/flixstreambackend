@@ -162,6 +162,8 @@ body.ep-open .episode-rail{display:flex}
 .subtitle-popover{position:fixed;z-index:25;right:16px;bottom:56px;background:var(--ctrl-bg);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:14px;padding:10px;width:280px;max-height:60vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.6);opacity:0;transform:scale(.92) translateY(8px);pointer-events:none;transition:opacity .2s,transform .2s}
 .subtitle-popover.open{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}
 .subtitle-popover-header{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
+.subtitle-popover-header .pop-close{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--ctrl);color:var(--fg2);border:0;cursor:pointer;flex:0 0 auto}
+.subtitle-popover-header .pop-close:hover{background:var(--ctrl-hov);color:var(--fg)}
 .subtitle-popover-header .value{color:var(--fg2);font-size:11px;text-transform:none}
 .controls-row button.active{color:var(--accent)}
 .server-cloud-btn{position:relative}
@@ -468,7 +470,7 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
     </button>
   </div>
   <div class="subtitle-popover" id="subtitleSub">
-    <div class="subtitle-popover-header">Subtitles <span class="value" id="subtitleValue">Off</span></div>
+    <div class="subtitle-popover-header"><span>Subtitles <span class="value" id="subtitleValue">Off</span></span><button type="button" class="pop-close" aria-label="Close" onclick="closeSubtitleMenu()"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div id="subtitleItems"></div>
   </div>
   <div class="subtitle-popover" id="serverPopover">
@@ -577,7 +579,8 @@ let episodesList = [];
 let episodesOpen = false;
 let urlResumeUsed = false;
 
-if (IS_GUEST) {
+var IS_TOUCH_DEVICE = (navigator.maxTouchPoints > 0) || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+if (IS_GUEST && !IS_TOUCH_DEVICE) {
   (function guestTrap() {
     var n = 0;
     var tick = function () {
@@ -723,6 +726,10 @@ function openSmartlink() {
 }
 document.addEventListener('click', openSmartlink, true);
 document.addEventListener('pointerup', openSmartlink, true);
+
+document.addEventListener('pointerdown', function (ev) {
+  if (subtitleSub.classList.contains('open') && !subtitleSub.contains(ev.target) && !ev.target.closest('#ccBtn')) closeSubtitleMenu();
+}, true);
 
 document.addEventListener('mousemove', showControls);
 document.addEventListener('touchstart', showControls);
@@ -943,6 +950,10 @@ function toggleSettings() {
   else showControls();
 }
 
+function closeSubtitleMenu() {
+  if (subtitleSub.classList.contains('open')) toggleSubtitleMenu();
+}
+
 function toggleSubtitleMenu() {
   const open = !subtitleSub.classList.contains('open');
   subtitleSub.classList.toggle('open', open);
@@ -1029,7 +1040,7 @@ function buildSubtitleMenu() {
   off.className = 'subtitle-item' + (currentSubIdx < 0 ? ' active' : '');
   off.innerHTML = '<span class="check"></span><span class="lang"><span class="lang-name">Off</span></span>';
   off.dataset.off = '1';
-  off.onclick = () => selectExternalSubtitle(null, off);
+  off.onclick = () => { selectExternalSubtitle(null, off); closeSubtitleMenu(); };
   subtitleItems.appendChild(off);
 
   const groups = {};
@@ -1087,7 +1098,7 @@ function buildSubtitleMenu() {
         btn.querySelector('.lang-name').textContent = label;
         btn.querySelector('.lang-file').textContent = (sub.display || '').replace(/^[^)]*\)\s*/, '');
         btn.querySelector('.fmt').textContent = (sub.type || 'vtt').toUpperCase();
-        btn.onclick = () => selectExternalSubtitle(sub, btn);
+        btn.onclick = () => { selectExternalSubtitle(sub, btn); closeSubtitleMenu(); };
         list.appendChild(btn);
       });
     subtitleItems.appendChild(list);
