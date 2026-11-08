@@ -287,10 +287,10 @@ body.chrome-visible .center-overlay{opacity:1}
 .controls-row .playback-cluster{order:0}
 .controls-row .volume-wrap .volume-slider{display:none}
 .controls-row .volume-wrap button{display:flex}
-.controls-row button{padding:9px;color:#fff;-webkit-tap-highlight-color:transparent;flex:0 0 auto}
-.controls-row button svg{width:25px;height:25px}
+.controls-row button{padding:7px;color:#fff;-webkit-tap-highlight-color:transparent;flex:0 0 auto}
+.controls-row button svg{width:21px;height:21px}
 .controls-row #epBtn{order:2}
-.controls-row #serverBtn{order:3}
+.controls-row #dlBtn{order:3}
 .controls-row #ccBtn{order:4}
 .controls-row button[title="Settings"]{order:5}
 .controls-row button[title="Fullscreen"]{order:6}
@@ -309,8 +309,8 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
 .bottom-controls{padding:0 24px calc(6px + env(safe-area-inset-bottom))}
 .progress-wrap{height:20px}
 .controls-row{padding:0}
-.controls-row button{padding:6px}
-.controls-row button svg{width:22px;height:22px}
+.controls-row button{padding:5px}
+.controls-row button svg{width:19px;height:19px}
 .settings-panel,.subtitle-popover{bottom:calc(62px + env(safe-area-inset-bottom));max-height:72vh}
 .title-card{bottom:calc(84px + env(safe-area-inset-bottom));max-width:60vw}
 .title-card .overview{display:none}
@@ -454,9 +454,8 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
     <button id="epBtn" onclick="toggleEpisodeRail()" title="Episodes" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="14" height="10" rx="2"/><path d="M7 5V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-1"/></svg>
     </button>
-    <button id="serverBtn" class="server-cloud-btn" onclick="toggleServerMenu()" title="Server">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .3-9 7 7 0 0 0-13.6 1.7A4 4 0 0 0 6 19h11.5z"/></svg>
-      <span class="srv-dot cloud-live-dot" id="serverLiveDot"></span>
+    <button id="dlBtn" onclick="openDownloads()" title="Download">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
     </button>
     <button id="ccBtn" onclick="toggleSubtitleMenu()" title="Subtitles">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8l-6 4V6z"/><path d="M7 10.5h3.5M7 13.5h5.5M15.5 10.5H19M15.5 13.5H17"/></svg>
@@ -954,6 +953,14 @@ function toggleSubtitleMenu() {
     clearTimeout(controlsTimer);
   }
   else showControls();
+}
+
+function openDownloads() {
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } catch (e) {}
+  notifyParent({ type: 'open-downloads', season: isTV ? currentSeason : undefined, episode: isTV ? currentEpisode : undefined });
 }
 
 function toggleServerMenu() {
