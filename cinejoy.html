@@ -162,6 +162,11 @@ body.ep-open .episode-rail{display:flex}
 .subtitle-popover{position:fixed;z-index:25;right:16px;bottom:56px;background:var(--ctrl-bg);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:14px;padding:10px;width:280px;max-height:60vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.6);opacity:0;transform:scale(.92) translateY(8px);pointer-events:none;transition:opacity .2s,transform .2s}
 .subtitle-popover.open{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}
 .subtitle-popover-header{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
+.sub-sync-row{display:flex;align-items:center;gap:8px;padding:2px 14px 8px;font-size:12px;color:var(--fg2)}
+.sub-sync-label{flex:1;font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:11px;color:var(--fg3)}
+.sub-sync-row button{min-width:34px;height:30px;border-radius:15px;border:0;background:var(--ctrl);color:var(--fg);font-size:14px;cursor:pointer}
+.sub-sync-row button:hover{background:var(--ctrl-hov)}
+.sub-sync-row .sub-sync-val{min-width:58px;font-size:12px;font-variant-numeric:tabular-nums}
 .subtitle-popover-header .pop-close{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--ctrl);color:var(--fg2);border:0;cursor:pointer;flex:0 0 auto}
 .subtitle-popover-header .pop-close:hover{background:var(--ctrl-hov);color:var(--fg)}
 .subtitle-popover-header .value{color:var(--fg2);font-size:11px;text-transform:none}
@@ -471,6 +476,7 @@ body.chrome-visible.ep-open .subtitle-overlay{bottom:calc(280px + env(safe-area-
   </div>
   <div class="subtitle-popover" id="subtitleSub">
     <div class="subtitle-popover-header"><span>Subtitles <span class="value" id="subtitleValue">Off</span></span><button type="button" class="pop-close" aria-label="Close" onclick="closeSubtitleMenu()"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sub-sync-row"><span class="sub-sync-label">Sync</span><button type="button" onclick="adjustSubOffset(-0.5)" aria-label="Subtitles earlier">&minus;</button><button type="button" class="sub-sync-val" onclick="resetSubOffset()" title="Reset" id="subOffsetValue">0.0s</button><button type="button" onclick="adjustSubOffset(0.5)" aria-label="Subtitles later">+</button></div>
     <div id="subtitleItems"></div>
   </div>
   <div class="subtitle-popover" id="serverPopover">
@@ -1145,6 +1151,7 @@ function removeNativeSubtitles() {
 
 function clearSubtitleSelection() {
   subtitleCues = [];
+  subBaseCues = [];
   currentSubIdx = -1;
   const ov = document.getElementById('subtitleOverlay');
   ov.classList.remove('visible');
@@ -1155,13 +1162,62 @@ function clearSubtitleSelection() {
   refreshSubtitleActive();
 }
 
+let subBaseCues = [];
+let subOffset = 0;
+function subOffsetKey() {
+  return 'flixstream:sub-offset:' + (isTV ? 'tv' : 'movie') + ':' + TMDB_ID + (isTV ? ':' + currentSeason + ':' + currentEpisode : '');
+}
+function loadSubOffset() {
+  try { subOffset = parseFloat(localStorage.getItem(subOffsetKey())) || 0; } catch (e) { subOffset = 0; }
+  updateSubOffsetLabel();
+}
+function updateSubOffsetLabel() {
+  const el = document.getElementById('subOffsetValue');
+  if (el) el.textContent = (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's';
+}
+function fmtVttTime(sec) {
+  const t = Math.max(0, sec);
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  const p2 = function (n) { return String(n).padStart(2, '0'); };
+  return p2(h) + ':' + p2(m) + ':' + s.toFixed(3).padStart(6, '0');
+}
+function cuesToVtt(cues) {
+  return 'WEBVTT\n\n' + cues.map(function (c, i) {
+    return (i + 1) + '\n' + fmtVttTime(c.s) + ' --> ' + fmtVttTime(c.e) + '\n' + c.t + '\n';
+  }).join('\n');
+}
+function applySubOffset() {
+  subtitleCues = subBaseCues.map(function (c) { return { s: c.s + subOffset, e: c.e + subOffset, t: c.t }; });
+  if (currentSubIdx >= 0 && subtitleList[currentSubIdx]) {
+    const sub = subtitleList[currentSubIdx];
+    enableNativeSubtitles(subOffset ? cuesToVtt(subtitleCues) : cuesToVtt(subBaseCues), sub.language || 'en', subLabel(sub));
+  }
+}
+function adjustSubOffset(delta) {
+  subOffset = Math.round((subOffset + delta) * 10) / 10;
+  if (Math.abs(subOffset) < 0.05) subOffset = 0;
+  try { localStorage.setItem(subOffsetKey(), String(subOffset)); } catch (e) {}
+  updateSubOffsetLabel();
+  if (subBaseCues.length) applySubOffset();
+}
+function resetSubOffset() {
+  subOffset = 0;
+  try { localStorage.removeItem(subOffsetKey()); } catch (e) {}
+  updateSubOffsetLabel();
+  if (subBaseCues.length) applySubOffset();
+}
+
 function setActiveSubtitle(sub, idx, vtt, cues) {
-  subtitleCues = cues;
+  subBaseCues = cues;
   currentSubIdx = idx;
   subtitleValue.textContent = subLabel(sub);
   ccBtn.classList.add('active');
+  if (subOffset) applySubOffset();
+  else {
+    subtitleCues = cues;
+    enableNativeSubtitles(vtt, sub.language || 'en', subLabel(sub));
+  }
   refreshSubtitleActive();
-  enableNativeSubtitles(vtt, sub.language || 'en', subLabel(sub));
 }
 
 function selectExternalSubtitle(sub, btn) {
@@ -1209,26 +1265,69 @@ function englishSubtitleScore(s) {
   return score;
 }
 
+function subtitleFitScore(cues, dur) {
+  if (!cues.length) return -100;
+  let last = 0;
+  for (const c of cues) if (c.e > last) last = c.e;
+  let score = 0;
+  if (cues[0].s > 600) score -= 20;
+  if (!(dur > 60 && isFinite(dur))) return score;
+  const ratio = last / dur;
+  const minRatio = isTV ? 0.85 : 0.78;
+  if (ratio > 1.015) score -= 60;
+  else if (ratio >= minRatio) score += 40 + ((ratio - minRatio) / (1 - minRatio)) * 10;
+  else if (ratio >= minRatio - 0.1) score += 0;
+  else score -= 40;
+  const perMin = cues.length / (dur / 60);
+  if (perMin < 2 || perMin > 40) score -= 15;
+  return score;
+}
+
+function waitForDuration(maxMs) {
+  return new Promise(function (resolve) {
+    const t0 = Date.now();
+    (function poll() {
+      if (video.duration > 60 && isFinite(video.duration)) return resolve(video.duration);
+      if (Date.now() - t0 > maxMs) return resolve(0);
+      setTimeout(poll, 400);
+    })();
+  });
+}
+
 function autoSelectEnglishSubtitle() {
   if (!subtitleList.length) return;
   const token = ++subToken;
   const ranked = subtitleList
     .map(function (s, i) { return { s: s, i: i, score: englishSubtitleScore(s) }; })
     .filter(function (x) { return x.score > 0; })
-    .sort(function (a, b) { return b.score - a.score; });
+    .sort(function (a, b) { return b.score - a.score; })
+    .slice(0, 5);
   if (!ranked.length) return;
 
-  const tryAt = function (n) {
-    if (n >= ranked.length || token !== subToken) return;
-    const pick = ranked[n];
-    loadSubtitle(pick.s).then(function (vtt) {
-      if (token !== subToken) return;
+  let applied = false;
+  const loaded = [];
+  const jobs = ranked.map(function (pick) {
+    return loadSubtitle(pick.s).then(function (vtt) {
       const cues = parseVTT(vtt);
       if (!cues.length) throw new Error('Empty subtitles');
-      setActiveSubtitle(pick.s, pick.i, vtt, cues);
-    }).catch(function () { tryAt(n + 1); });
-  };
-  tryAt(0);
+      const item = { pick: pick, vtt: vtt, cues: cues };
+      loaded.push(item);
+      if (!applied && token === subToken && !userSubUrl) {
+        applied = true;
+        setActiveSubtitle(pick.s, pick.i, vtt, cues);
+      }
+    }).catch(function () {});
+  });
+
+  Promise.all(jobs).then(function () { return waitForDuration(12000); }).then(function (dur) {
+    if (token !== subToken || userSubUrl || !loaded.length || !dur) return;
+    let best = null;
+    loaded.forEach(function (item) {
+      item.total = item.pick.score + subtitleFitScore(item.cues, dur);
+      if (!best || item.total > best.total) best = item;
+    });
+    if (best && best.pick.i !== currentSubIdx) setActiveSubtitle(best.pick.s, best.pick.i, best.vtt, best.cues);
+  });
 }
 
     // Enable native HTML5 <track> so mobile/iOS/Android native fullscreen shows CC
@@ -1446,6 +1545,7 @@ async function resolveCinejoy(serverName) {
 
 function applySubtitles(data) {
   if (!data.subtitles) return;
+  loadSubOffset();
   subtitleList = data.subtitles;
   const keep = userSubUrl ? subtitleList.findIndex(function (s) { return s.url === userSubUrl; }) : -1;
   if (keep >= 0 && subtitleCues.length) {
@@ -2307,6 +2407,7 @@ document.addEventListener('click', function (ev) {
 
 // ── Init ──
 titleText.textContent = 'Now Playing';
+loadSubOffset();
 loadTheme();
 (function restoreVolume() {
   let v = 1, m = false;
