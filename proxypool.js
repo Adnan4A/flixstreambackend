@@ -132,7 +132,8 @@ async function refresh() {
 }
 
 function ensureFresh() {
-    if (!refreshing && Date.now() - lastRefresh > REFRESH_MS) void refresh();
+    if (refreshing) return;
+    if (Date.now() - lastRefresh > REFRESH_MS || (pool.length < 6 && Date.now() - lastRefresh > 20000)) void refresh();
 }
 
 async function request(url, { headers, timeoutMs = 12000, method = 'GET' } = {}) {

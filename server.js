@@ -909,9 +909,9 @@ async function probePlaylistPlayable(streamUrl) {
     const up = await Promise.race([
         impersonatedRequest(streamUrl, {
             headers: { Referer: 'https://cinejoy.pk/', Origin: 'https://cinejoy.pk' },
-            timeoutMs: 15000,
+            timeoutMs: 30000,
         }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('playlist probe timeout')), 16000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('playlist probe timeout')), 34000)),
     ]);
     const status = up && up.status;
     const head = up && up.body ? up.body.subarray(0, 16).toString('latin1') : '';
