@@ -16,6 +16,9 @@ const TEST_CONCURRENCY = 80;
 const REFRESH_MS = 8 * 60 * 1000;
 const CDN_HEADERS = { Origin: 'https://cinejoy.pk', Referer: 'https://cinejoy.pk/' };
 
+const WARP = process.env.WARP_PROXY === '' ? '' : (process.env.WARP_PROXY || 'socks5h://127.0.0.1:40000');
+let warpFails = 0;
+let warpDownUntil = 0;
 let pool = []; // { addr, ms, fails }
 let refreshing = null;
 let lastRefresh = 0;
@@ -28,7 +31,7 @@ function shouldProxy(url) {
 function curlVia(addr, url, { headers = CDN_HEADERS, timeoutMs = 10000, method = 'GET', maxBytes = 40 * 1024 * 1024, onChild } = {}) {
     return new Promise((resolve) => {
         const args = ['-s', '-m', String(Math.max(1, Math.ceil(timeoutMs / 1000))), '--connect-timeout', '5',
-            '-x', 'http://' + addr, '-X', method, '-w', '\n__CODE__%{http_code}'];
+            '-x', /^socks/.test(addr) ? addr : 'http://' + addr, '-X', method, '-w', '\n__CODE__%{http_code}'];
         for (const [k, v] of Object.entries(headers)) args.push('-H', k + ': ' + v);
         args.push(url);
         const child = spawn('/usr/bin/curl', args, { stdio: ['ignore', 'pipe', 'ignore'] });
@@ -137,6 +140,15 @@ function ensureFresh() {
 }
 
 async function request(url, { headers, timeoutMs = 12000, method = 'GET' } = {}) {
+    const merged0 = Object.assign({}, CDN_HEADERS, headers || {});
+    if (WARP && Date.now() > warpDownUntil) {
+        for (let i = 0; i < 2; i++) {
+            const r = await curlVia(WARP, url, { headers: merged0, timeoutMs: Math.min(timeoutMs, 25000), method });
+            const removed = r.status === 404 && r.body.length <= 8 && r.body.toString('latin1').trim() === 'Removed';
+            if (r.status !== 0 && !removed && r.status !== 403 && r.status !== 429) { warpFails = 0; return { status: r.status, body: r.body, headers: {} }; }
+        }
+        if (++warpFails >= 3) { warpDownUntil = Date.now() + 60000; warpFails = 0; }
+    }
     if (!pool.length) await refresh();
     else ensureFresh();
     const tried = new Set();
