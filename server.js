@@ -1217,6 +1217,21 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (pathname.startsWith('/api/cj-lib/') && req.method === 'GET') {
+        const name = path.basename(pathname);
+        if (!/^[\w.-]+\.js$/.test(name)) { res.writeHead(404); res.end(); return; }
+        fs.readFile(path.join(__dirname, 'cine_api', 'cinejoy-lib', name), (err, buf) => {
+            if (err) { res.writeHead(404, { 'Access-Control-Allow-Origin': '*' }); res.end(); return; }
+            res.writeHead(200, {
+                'Content-Type': 'text/javascript; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=3600',
+            });
+            res.end(buf);
+        });
+        return;
+    }
+
     if (!pathname.startsWith('/api/')) {
         hide(res, 404, pathname);
         return;

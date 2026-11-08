@@ -1753,6 +1753,44 @@ async function switchServer(name) {
   }
 }
 
+let browserResolveFailed = false;
+let browserLibPromise = null;
+function loadBrowserResolver() {
+  if (!browserLibPromise) {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function (u, o) {
+      const href = typeof u === 'string' ? u : (u && (u.url || u.href)) || '';
+      if (/api\.shegu\.st/i.test(href)) return nativeFetch(href.replace(/api\.shegu\.st/gi, 'api.wing.st'), o);
+      return nativeFetch(u, o);
+    };
+    browserLibPromise = import(apiUrl('/api/cj-lib/CGdZuRE1.js')).catch(function (err) { browserLibPromise = null; throw err; });
+  }
+  return browserLibPromise;
+}
+
+async function resolveInBrowser() {
+  const lib = await loadBrowserResolver();
+  const ctx = { tmdbId: String(TMDB_ID) };
+  if (isTV) { ctx.season = String(currentSeason); ctx.episode = String(currentEpisode); }
+  let winner = '';
+  const res = await Promise.race([
+    lib.s(isTV ? 'tv' : 'movie', ctx, function (p) {
+      if (p && p.status && p.status !== 'checking') winner = p.provider || winner;
+    }, undefined),
+    sleep(40000).then(function () { throw new Error('timeout'); })
+  ]);
+  const url = res && res.result && res.result.url;
+  if (!url || !/^https?:\/\//i.test(url)) throw new Error('no url');
+  const subtitles = (res.result.captions || []).filter(function (c) { return c && c.url; }).map(function (c) {
+    return { language: c.language || c.lang || 'und', url: c.url, type: c.type || c.format || 'vtt', display: c.display || c.label || c.language || 'Subtitle' };
+  });
+  return {
+    data: { provider: 'Direct', servers: [], subtitles: subtitles },
+    stream: { playlist: url, kind: /\.mp4(\?|$)/i.test(url) ? 'mp4' : 'hls', source: 'browser' },
+    playlist: url
+  };
+}
+
 let loadToken = 0;
 const RESOLVE_TRIES = 2;
 const WARMING_TRIES = 5;
@@ -1771,7 +1809,25 @@ async function loadStream(tryNo) {
     }
   }, 15000);
   try {
-    const { data, stream, playlist } = await fetchCinejoy(selectedServer);
+    const serverP = fetchCinejoy(selectedServer);
+    let serverErr = null;
+    serverP.catch(function (err) { serverErr = err; });
+    const useDirect = selectedServer === 'auto' && !browserResolveFailed;
+    const directP = useDirect
+      ? sleep(7000).then(function () {
+          if (token !== loadToken) throw new Error('stale');
+          return resolveInBrowser();
+        })
+      : Promise.reject(new Error('direct disabled'));
+    directP.catch(function () {});
+    let out;
+    try {
+      out = await Promise.any([serverP, directP]);
+    } catch (agg) {
+      if (useDirect) browserResolveFailed = true;
+      throw serverErr || new Error('Playlist error: no source found.');
+    }
+    const { data, stream, playlist } = out;
     clearTimeout(slowTimer);
     if (token !== loadToken) return;
     if (warnSticky) hideWarn();
@@ -1797,7 +1853,7 @@ async function loadStream(tryNo) {
   }
 }
 
-function retry() { attempt = 0; autoExclude.clear(); loadStream(); }
+function retry() { browserResolveFailed = false; attempt = 0; autoExclude.clear(); loadStream(); }
 
 function buildQualityOptions(levels) {
   qualitySub.innerHTML = '';
