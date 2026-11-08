@@ -1444,22 +1444,32 @@ const server = http.createServer(async (req, res) => {
         if (!targetUrl) { hide(res, 400); return; }
         const target = targetUrl.href;
         try {
-            const subRes = await fetch(target, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                    'Referer': 'https://cinejoy.pk/',
-                    'Origin': 'https://cinejoy.pk',
-                    'Accept': 'text/plain,text/vtt,*/*'
-                },
-                signal: AbortSignal.timeout(12000),
-                redirect: 'follow'
-            });
-            if (!subRes.ok) {
+            const pp = require('./proxypool.js');
+            let subOk;
+            let content;
+            if (pp.shouldProxy(target)) {
+                const up = await pp.request(target, { timeoutMs: 15000 });
+                subOk = up.status >= 200 && up.status < 300;
+                content = subOk ? up.body.toString('utf8') : '';
+            } else {
+                const subRes = await fetch(target, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                        'Referer': 'https://cinejoy.pk/',
+                        'Origin': 'https://cinejoy.pk',
+                        'Accept': 'text/plain,text/vtt,*/*'
+                    },
+                    signal: AbortSignal.timeout(12000),
+                    redirect: 'follow'
+                });
+                subOk = subRes.ok;
+                content = subOk ? await subRes.text() : '';
+            }
+            if (!subOk) {
                 res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end('');
                 return;
             }
-            let content = await subRes.text();
             if (content.length > 2000000) content = content.slice(0, 2000000);
             content = content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
             if (/^\s*</.test(content) || /cloudflare|error code:/i.test(content.slice(0, 240))) {
