@@ -1791,6 +1791,20 @@ async function resolveInBrowser() {
   };
 }
 
+async function reportDirectDiag(url) {
+  const r = { url: url.slice(0, 90), page: location.origin };
+  try {
+    const x = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    r.cors = x.status;
+    r.head = (await x.text()).slice(0, 40);
+  } catch (e) { r.cors = 'fail ' + String(e && e.message || e).slice(0, 60); }
+  try { await fetch(url, { mode: 'no-cors', credentials: 'omit' }); r.noCors = 'reachable'; }
+  catch (e) { r.noCors = 'fail'; }
+  try {
+    await apiFetch('/api/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
+  } catch (e) {}
+}
+
 let loadToken = 0;
 const RESOLVE_TRIES = 2;
 const WARMING_TRIES = 5;
@@ -1828,6 +1842,7 @@ async function loadStream(tryNo) {
       throw serverErr || new Error('Playlist error: no source found.');
     }
     const { data, stream, playlist } = out;
+    if (stream.source === 'browser') reportDirectDiag(playlist);
     clearTimeout(slowTimer);
     if (token !== loadToken) return;
     if (warnSticky) hideWarn();

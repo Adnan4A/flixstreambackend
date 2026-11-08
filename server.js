@@ -1282,6 +1282,16 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (pathname === '/api/diag' && req.method === 'POST') {
+        try {
+            const d = JSON.parse(await readBody(req));
+            console.log('client-diag', JSON.stringify(d).slice(0, 600), '| ua=' + String(req.headers['user-agent'] || '').slice(0, 120), '| ip=' + ip);
+        } catch (_) {}
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
     if (pathname === '/api/cinejoy') {
         if (req.method !== 'POST') { hide(res, 404); return; }
         try {
