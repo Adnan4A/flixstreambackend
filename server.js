@@ -465,6 +465,23 @@ function publicHttpUrl(raw) {
 
 // Rewrite an m3u8 body: direct=1 → absolute CDN URLs (browser fetches segments),
 // otherwise → proxied /api/cjproxy URLs (server relays everything).
+function capVariantsForMobile(text, ua) {
+    if (!/iPhone|iPad|iPod|Android|Mobile/i.test(String(ua || ""))) return text;
+    const lines = text.split(/\r?\n/);
+    const out = [];
+    let kept = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^#EXT-X-STREAM-INF:/i.test(line)) {
+            const m = /RESOLUTION=\d+x(\d+)/i.exec(line);
+            if (m && parseInt(m[1], 10) > 1080) { i++; continue; }
+            kept++;
+        }
+        out.push(line);
+    }
+    return kept > 0 ? out.join("\n") : text;
+}
+
 function rewritePlaylist(text, targetUrl, direct) {
     const baseUrl = targetUrl.href.slice(0, targetUrl.href.lastIndexOf('/') + 1);
     const toAbs = (u) => {
@@ -1676,7 +1693,7 @@ const server = http.createServer(async (req, res) => {
                         playlistFail(404);
                         return;
                     }
-                    playlistText = filtered.text;
+                    playlistText = capVariantsForMobile(filtered.text, req.headers['user-agent']);
                 }
                 // Masters stay on /api/cjproxy (the CDN playlist itself often 502s
                 // in the browser). Segment URLs go direct only when the CDN allows a
