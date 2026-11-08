@@ -1713,6 +1713,11 @@ function playNativeHls(playlist) {
     startPlayback();
     updateTitleCard();
   }, { once: true });
+  if (/lightspeed\.st/.test(playlist)) {
+    let m = document.querySelector('meta[name="referrer"]');
+    if (!m) { m = document.createElement('meta'); m.name = 'referrer'; document.head.appendChild(m); }
+    m.content = 'no-referrer';
+  }
   video.src = playlist;
   video.load();
 }
