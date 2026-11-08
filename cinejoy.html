@@ -1679,7 +1679,8 @@ function playResolved(stream, playlist) {
   }
   setStatus(STATUS.load);
   const mseOk = typeof Hls !== 'undefined' && Hls.isSupported();
-  if (!mseOk && video.canPlayType('application/vnd.apple.mpegurl')) {
+  const nativeOk = !!video.canPlayType('application/vnd.apple.mpegurl');
+  if ((!mseOk || stream.source === 'browser') && nativeOk) {
     playNativeHls(playlist);
     return;
   }
@@ -1696,10 +1697,15 @@ function playNativeHls(playlist) {
     started = true;
     recoverOrFail('Playback error: ' + why);
   };
-  const timer = setTimeout(function () { fail('the stream did not start.'); }, 25000);
-  video.onerror = function () { clearTimeout(timer); fail('this browser could not play the stream.'); };
+  const diag = function (what) {
+    if (!/lightspeed\.st/.test(playlist)) return;
+    apiFetch('/api/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ native: what, code: video.error && video.error.code }) }).catch(function () {});
+  };
+  const timer = setTimeout(function () { diag('timeout'); fail('the stream did not start.'); }, 25000);
+  video.onerror = function () { clearTimeout(timer); diag('error'); fail('this browser could not play the stream.'); };
   video.addEventListener('loadedmetadata', function () {
     if (started || token !== loadToken) return;
+    diag('ok');
     started = true;
     clearTimeout(timer);
     loading.classList.add('hidden');
