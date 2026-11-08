@@ -1452,10 +1452,10 @@ function wireHls(playlist) {
     maxBufferHole: 0.5,
     fragLoadPolicy: {
       default: {
-        maxTimeToFirstByteMs: 12000,
-        maxLoadTimeMs: 20000,
-        timeoutRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 },
-        errorRetry: { maxNumRetry: 0, retryDelayMs: 0, maxRetryDelayMs: 0 }
+        maxTimeToFirstByteMs: 35000,
+        maxLoadTimeMs: 45000,
+        timeoutRetry: { maxNumRetry: 1, retryDelayMs: 500, maxRetryDelayMs: 2000 },
+        errorRetry: { maxNumRetry: 1, retryDelayMs: 500, maxRetryDelayMs: 2000 }
       }
     },
     xhrSetup: function (xhr, url) {
@@ -1764,6 +1764,7 @@ async function switchServer(name) {
   }
 }
 
+const ENABLE_DIRECT = false;
 let browserResolveFailed = false;
 let browserLibPromise = null;
 function loadBrowserResolver() {
@@ -1837,7 +1838,7 @@ async function loadStream(tryNo) {
     const serverP = fetchCinejoy(selectedServer);
     let serverErr = null;
     serverP.catch(function (err) { serverErr = err; });
-    const useDirect = selectedServer === 'auto' && !browserResolveFailed;
+    const useDirect = ENABLE_DIRECT && selectedServer === 'auto' && !browserResolveFailed;
     const directP = useDirect
       ? sleep(7000).then(function () {
           if (token !== loadToken) throw new Error('stale');

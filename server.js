@@ -587,6 +587,7 @@ function firstPlaylistUris(playlistText, playlistUrl, limit) {
 }
 
 function headOk(url, maxSec = 8) {
+    if (require('./proxypool.js').shouldProxy(url)) return Promise.resolve(true);
     return new Promise((resolve) => {
         const child = spawn('/usr/bin/curl', [
             '-sS', '-I', '-o', '/dev/null', '-w', '%{http_code}',
@@ -611,6 +612,7 @@ function headOk(url, maxSec = 8) {
 // cinejoy.pk Origin, so their segments must go through /api/cjproxy.
 const corsHostCache = new Map();
 function hostAllowsFlixOrigin(url) {
+    if (require('./proxypool.js').shouldProxy(url)) return Promise.resolve(false);
     let host;
     try { host = new URL(url).hostname; } catch (e) { return Promise.resolve(false); }
     const cached = corsHostCache.get(host);
@@ -1561,6 +1563,24 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        if (require('./proxypool.js').shouldProxy(target)) {
+            const pp = require('./proxypool.js');
+            const extra = req.headers.range ? { Range: req.headers.range } : {};
+            const up = await pp.request(target, { headers: extra, timeoutMs: 30000 });
+            if (!up.status || up.status >= 500 || up.status === 404 || !up.body.length) {
+                res.writeHead(404, corsHdrs);
+                res.end();
+                return;
+            }
+            const sniff = up.body.subarray(0, 16).toString('latin1');
+            let ct = 'application/octet-stream';
+            if (sniff.includes('ftyp') || up.body.subarray(4, 8).toString('latin1') === 'moof') ct = 'video/mp4';
+            else if (up.body[0] === 0x47) ct = 'video/mp2t';
+            res.writeHead(up.status, Object.assign({ 'Content-Type': ct, 'Content-Length': up.body.length, 'Cache-Control': 'no-store' }, corsHdrs));
+            res.end(up.body);
+            return;
+        }
+
         const hdrs = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
             'Accept': '*/*',
@@ -1707,6 +1727,23 @@ const server = http.createServer(async (req, res) => {
     hide(res, 404);
 });
 
+{
+    const pp = require('./proxypool.js');
+    let cached = { at: 0, url: null };
+    pp.setProbeProvider(async () => {
+        if (cached.url && Date.now() - cached.at < 20 * 60 * 1000) return cached.url;
+        const cj = require('./cine_api/cinejoy.js');
+        for (const id of ['603', '550', '27205']) {
+            try {
+                const r = await cj.resolve('movie', { tmdbId: id });
+                if (r && r.url && pp.shouldProxy(r.url)) { cached = { at: Date.now(), url: r.url }; return r.url; }
+            } catch (e) {}
+        }
+        return cached.url;
+    });
+}
+
 server.listen(PORT, '127.0.0.1', () => {
+    setTimeout(() => { require('./proxypool.js').refresh(); }, 1500);
     console.log(`flixstream-backend listening on http://127.0.0.1:${PORT}`);
 });

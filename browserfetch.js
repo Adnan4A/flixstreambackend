@@ -67,6 +67,8 @@ function baseArgs(bin) {
 
 // Full-buffer request via curl-impersonate (intended for small bodies: m3u8).
 function impersonatedRequest(target, { headers = {}, timeoutMs = 20000, method = 'GET' } = {}) {
+    const pool = require('./proxypool.js');
+    if (pool.shouldProxy(target)) return pool.request(target, { headers, timeoutMs, method });
     const bin = curlBinary();
     if (!bin) return lowLevelFallback(target, headers, timeoutMs, method);
     return new Promise((resolve, reject) => {
