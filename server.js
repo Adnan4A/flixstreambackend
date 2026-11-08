@@ -1084,6 +1084,97 @@ function pickCert(type, data) {
     return (theatrical || withCert[0])?.certification || '';
 }
 
+
+const DL_HOST = 'https://a.111477.xyz';
+const dlCache = new Map();
+const DL_TTL_OK = 60 * 60 * 1000;
+const DL_TTL_MISS = 10 * 60 * 1000;
+
+function dlChallenge(status, text) {
+    return status === 403 || status === 429 || status >= 500 || status === 0 || /Just a moment|cf-chl|challenge-platform/i.test(String(text || '').slice(0, 4000));
+}
+
+async function dlFetchListing(listUrl) {
+    const hit = dlCache.get(listUrl);
+    if (hit && Date.now() < hit.expires) return hit.rows;
+    let text = '';
+    let status = 0;
+    try {
+        const r = await __fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36', Accept: 'text/html' }, signal: AbortSignal.timeout(12000) });
+        status = r.status;
+        text = await r.text();
+    } catch (e) { status = 0; }
+    if (dlChallenge(status, text) || !/data-entry="true"|data-parent="true"/.test(text)) {
+        const w = await require('./proxypool.js').viaWarp(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36', Accept: 'text/html' } });
+        status = w.status;
+        text = w.body.toString('utf8');
+    }
+    const rows = [];
+    if (status === 200) {
+        const re = /<tr data-entry="true" data-name="([^"]*)" data-url="([^"]*)"[\s\S]*?<td class="size"[^>]*data-sort="(-?\d+)"/g;
+        let m;
+        const dec = (v) => v.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        while ((m = re.exec(text))) rows.push({ name: dec(m[1]), url: dec(m[2]), size: parseInt(m[3], 10) });
+    }
+    dlCache.set(listUrl, { rows, expires: Date.now() + (rows.length ? DL_TTL_OK : DL_TTL_MISS) });
+    if (dlCache.size > 500) dlCache.delete(dlCache.keys().next().value);
+    return rows;
+}
+
+function dlNameVariants(title) {
+    const t = String(title || '').trim();
+    const out = [t, t.replace(/:/g, ''), t.replace(/:/g, ' -'), t.replace(/[:?"*<>|\/]/g, ''), t.replace(/&/g, 'and')];
+    return Array.from(new Set(out.filter(Boolean)));
+}
+
+function dlEnc(v) {
+    return encodeURIComponent(v).replace(/[()!']/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
+function dlQuality(name) {
+    if (/2160p|\b4k\b|uhd/i.test(name)) return '4K';
+    if (/1080p/i.test(name)) return '1080p';
+    if (/720p/i.test(name)) return '720p';
+    if (/480p|dvd/i.test(name)) return '480p';
+    return 'Other';
+}
+
+function dlHuman(bytes) {
+    if (!(bytes > 0)) return '';
+    const gb = bytes / 1073741824;
+    return gb >= 1 ? gb.toFixed(2) + ' GB' : Math.round(bytes / 1048576) + ' MB';
+}
+
+async function buildDownloads(type, tmdb, seasonWanted) {
+    const meta = await fetchTmdbMeta(type, tmdb, 0);
+    if (!meta.title) return { files: [], seasons: [] };
+    if (type === 'movie') {
+        for (const name of dlNameVariants(meta.title)) {
+            const dir = `/movies/${dlEnc(name + (meta.year ? ` (${meta.year})` : ''))}/`;
+            const rows = (await dlFetchListing(DL_HOST + dir)).filter((r) => r.size >= 0);
+            if (rows.length) return { files: rows, seasons: [] };
+        }
+        return { files: [], seasons: [] };
+    }
+    for (const name of dlNameVariants(meta.title)) {
+        const base = `/tvs/${dlEnc(name)}/`;
+        const top = await dlFetchListing(DL_HOST + base);
+        const seasonsFound = [];
+        const re = /^Season (\d+)$/i;
+        const dirs = top.filter((r) => r.size < 0).map((r) => r.name);
+        for (const d of dirs) { const m = re.exec(d); if (m) seasonsFound.push(parseInt(m[1], 10)); }
+        seasonsFound.sort((a, b) => a - b);
+        if (!seasonsFound.length && !top.length) continue;
+        const season = seasonsFound.includes(seasonWanted) ? seasonWanted : seasonsFound[0];
+        let files = [];
+        if (season) {
+            files = (await dlFetchListing(DL_HOST + base + dlEnc('Season ' + season) + '/')).filter((r) => r.size >= 0);
+        }
+        return { files, seasons: seasonsFound, season };
+    }
+    return { files: [], seasons: [] };
+}
+
 async function fetchTmdbMeta(type, id, seasonNum) {
     const kind = type === 'tv' ? 'tv' : 'movie';
     const sn = kind === 'tv' ? (parseInt(seasonNum, 10) || 0) : 0;
@@ -1249,6 +1340,40 @@ const server = http.createServer(async (req, res) => {
     if (tooMany(ip, isProxy ? 'media' : 'api', isProxy ? 800 : 40, 60000)) {
         res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '60' });
         res.end('{}');
+        return;
+    }
+
+    if (pathname === '/api/downloads') {
+        const tmdb = parseInt(url.searchParams.get('tmdb'), 10);
+        const type = url.searchParams.get('type') === 'tv' ? 'tv' : 'movie';
+        const season = parseInt(url.searchParams.get('season'), 10) || 0;
+        if (!Number.isInteger(tmdb) || tmdb < 1) { hide(res, 400); return; }
+        try {
+            const out = await buildDownloads(type, tmdb, season);
+            const order = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3, Other: 4 };
+            const files = out.files
+                .filter((f) => /\.(mkv|mp4|avi|m4v|mov|webm)$/i.test(f.name))
+                .map((f) => {
+                    const ep = /S(\d{1,2})E(\d{1,3})/i.exec(f.name) || /(\d{1,2})x(\d{2,3})/i.exec(f.name);
+                    return {
+                        host: 'Onedrive',
+                        quality: dlQuality(f.name),
+                        size: f.size,
+                        sizeLabel: dlHuman(f.size),
+                        name: f.name,
+                        url: DL_HOST + f.url,
+                        season: ep ? parseInt(ep[1], 10) : null,
+                        episode: ep ? parseInt(ep[2], 10) : null
+                    };
+                })
+                .sort((a, b) => (order[a.quality] - order[b.quality]) || ((a.episode || 0) - (b.episode || 0)) || (b.size - a.size));
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' });
+            res.end(JSON.stringify({ files, seasons: out.seasons || [], season: out.season || null }));
+        } catch (e) {
+            console.error('downloads error:', e.message);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ files: [], seasons: [], season: null }));
+        }
         return;
     }
 

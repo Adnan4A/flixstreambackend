@@ -204,4 +204,9 @@ async function request(url, { headers, timeoutMs = 12000, method = 'GET' } = {})
 
 function stats() { return { size: pool.length, lastRefresh, refreshing: !!refreshing }; }
 
-module.exports = { shouldProxy, request, refresh, stats, setProbeProvider };
+function viaWarp(url, { headers, timeoutMs = 20000 } = {}) {
+    if (!WARP) return Promise.resolve({ status: 0, body: Buffer.alloc(0) });
+    return curlVia(WARP, url, { headers: headers || { 'User-Agent': 'Mozilla/5.0' }, timeoutMs, maxBytes: 8 * 1024 * 1024 });
+}
+
+module.exports = { shouldProxy, request, refresh, stats, setProbeProvider, viaWarp };
